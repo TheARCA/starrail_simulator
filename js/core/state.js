@@ -15,6 +15,9 @@ export const state = {
   pendingAction: null,
   activeSkillName: null,
 
+  sp: 3,
+  maxSp: 5,
+
   fx: {
     shake: 0,
     flash: 0,

@@ -328,11 +328,13 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
       } else {
         ctx.font = "800 10px 'NewRodin', sans-serif";
         ctx.textAlign = "center";
+
+        // PURGED: Replaced #D32F2F with the Nier Dark #47443b
         drawTextWithCA(
           "WEAKNESS BROKEN",
           x + CARD_SIZE / 2,
           toughY + 5,
-          "#D32F2F",
+          "#47443b",
         );
       }
     }

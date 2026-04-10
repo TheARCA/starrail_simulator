@@ -37,10 +37,20 @@ export async function executeCombatSequence(action, attacker) {
   const isCinematic = action === "ULTIMATE" || state.isEnhanced;
   if (isCinematic) {
     state.fx.cinematic = true;
-    playUltimateCharge(); // <--- NEW
+    playUltimateCharge();
   }
 
   state.activeSkillName = moveData.name;
+
+  // --- NEW: SKILL POINT CONSUMPTION & GENERATION ---
+  if (!state.isEnhanced) {
+    if (action === "ATTACK") {
+      state.sp = Math.min(state.maxSp || 5, (state.sp || 0) + 1);
+    } else if (action === "SKILL") {
+      state.sp = Math.max(0, (state.sp || 0) - 1);
+    }
+  }
+
   await sleep(500);
 
   if (moveData.energyGen)

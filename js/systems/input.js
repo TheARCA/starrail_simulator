@@ -117,7 +117,8 @@ export function initInputs(onStartBattle, onExecuteCombat) {
     if (isInside(mouse.x, mouse.y, btnAttack)) {
       state.pendingAction = "ATTACK";
     } else if (isInside(mouse.x, mouse.y, btnSkill)) {
-      state.pendingAction = "SKILL";
+      // --- FIXED: Only allow skill selection if SP is available!
+      if (state.sp > 0) state.pendingAction = "SKILL";
     } else if (isInside(mouse.x, mouse.y, btnUltimate) && !state.isEnhanced) {
       const ultCost = activeChar.combatLogic.ultimate.cost || 120;
       if (activeChar.energy >= ultCost) {
@@ -158,8 +159,12 @@ export function initInputs(onStartBattle, onExecuteCombat) {
       state.selectedTargetId = aliveEnemies[currentIndex].id;
     }
 
-    if (key === "q") state.pendingAction = "ATTACK";
-    else if (key === "e") state.pendingAction = "SKILL";
+    if (key === "q") {
+      state.pendingAction = "ATTACK";
+    } else if (key === "e") {
+      // --- FIXED: Keyboard restriction
+      if (state.sp > 0) state.pendingAction = "SKILL";
+    }
 
     // Ultimate Hijack System
     if (["1", "2", "3", "4"].includes(key)) {

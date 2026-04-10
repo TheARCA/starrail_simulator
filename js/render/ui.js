@@ -273,6 +273,90 @@ export function drawActionBar() {
   ctx.restore();
 }
 
+function drawSkillPoints() {
+  const spW = 35;
+  const spH = 12;
+  const gap = 8;
+  const totalW = state.maxSp * spW + (state.maxSp - 1) * gap;
+
+  // Fit perfectly above the right side of the main action panel
+  const startX = UI_PANEL.x + UI_PANEL.w - totalW - 50;
+  const startY = UI_PANEL.y - 25;
+
+  ctx.save();
+  ctx.font = "800 16px 'NewRodin', sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  drawTextWithCA(
+    "SKILL POINTS",
+    startX - 20,
+    startY + spH / 2 + 1,
+    "rgba(71, 68, 59, 0.8)",
+  );
+
+  // --- NEW: DETERMINE PREVIEW STATE ---
+  let previewAction = null;
+  // Only preview if it's the player's turn, not animating, and we aren't in a special Enhanced state
+  if (
+    state.current === STATES.PLAYER_TURN &&
+    !state.isAnimating &&
+    !state.isEnhanced
+  ) {
+    if (
+      isInside(mouse.x, mouse.y, btnAttack) ||
+      state.pendingAction === "ATTACK"
+    )
+      previewAction = "ATTACK";
+    else if (
+      isInside(mouse.x, mouse.y, btnSkill) ||
+      state.pendingAction === "SKILL"
+    )
+      previewAction = "SKILL";
+  }
+
+  // Create a smooth, pulsing alpha value for the previews
+  const pulseAlpha = 0.4 + Math.abs(Math.sin(performance.now() / 150)) * 0.6;
+
+  for (let i = 0; i < state.maxSp; i++) {
+    const px = startX + i * (spW + gap);
+
+    // Logic to find which specific slot to animate
+    let isPreviewGain = previewAction === "ATTACK" && i === state.sp; // The empty slot that will be filled
+    let isPreviewSpend = previewAction === "SKILL" && i === state.sp - 1; // The filled slot that will be emptied
+
+    // Draw recessed base slot
+    ctx.fillStyle = "rgba(71, 68, 59, 0.2)";
+    drawChamferedRect(px, startY, spW, spH, 3);
+    ctx.fill();
+
+    if (isPreviewGain) {
+      // --- PURGED: SP Gain is now pulsing Light Beige ---
+      ctx.fillStyle = `rgba(215, 207, 184, ${pulseAlpha * 0.4})`;
+      drawChamferedRect(px, startY, spW, spH, 3);
+      ctx.fill();
+      strokeWithCA(`rgba(215, 207, 184, ${pulseAlpha})`, 2);
+    } else if (isPreviewSpend) {
+      // --- PURGED: SP Spend is now pulsing Dark Brown ---
+      ctx.fillStyle = `rgba(71, 68, 59, ${pulseAlpha * 0.6})`;
+      drawChamferedRect(px, startY, spW, spH, 3);
+      ctx.fill();
+      strokeWithCA(`rgba(71, 68, 59, 1)`, 2);
+    } else if (i < state.sp) {
+      // --- NORMAL FILLED SP ---
+      applyHardShadow();
+      ctx.fillStyle = NIER_LIGHT;
+      drawChamferedRect(px, startY, spW, spH, 3);
+      ctx.fill();
+      clearShadow();
+      strokeWithCA(NIER_DARK, 1);
+    } else {
+      // --- NORMAL EMPTY SP ---
+      strokeWithCA("rgba(71, 68, 59, 0.4)", 1);
+    }
+  }
+  ctx.restore();
+}
+
 export function drawUI() {
   ctx.save();
   applyHardShadow();
@@ -293,19 +377,9 @@ export function drawUI() {
       Math.random() * 8 + 4,
     );
 
-  const coordX = mouse.x.toFixed(1);
-  const coordY = mouse.y.toFixed(1);
-  ctx.font = "400 12px 'NewRodin', sans-serif";
-  ctx.textAlign = "center";
-  drawTextWithCA(
-    `SYS.OP // TACTICAL COMMAND OVERLAY   [ LAT: ${coordX} LON: ${coordY} ]`,
-    GAME_WIDTH / 2,
-    UI_PANEL.y - 15,
-    "rgba(71, 68, 59, 0.7)",
-  );
-  ctx.textAlign = "left";
-
   if (state.current === STATES.PLAYER_TURN) {
+    drawSkillPoints();
+
     const activeChar =
       party.find((p) => p.id === state.activeUnitId) || party[0];
     if (activeChar && !state.isAnimating) {
@@ -326,10 +400,12 @@ export function drawUI() {
       const atkActive = state.pendingAction === "ATTACK";
       const skillActive = state.pendingAction === "SKILL";
       const ultActive = state.pendingAction === "ULTIMATE";
+
       const canUlt = (activeChar.energy || 0) >= (logic.ultimate.cost || 120);
+      const canSkill = state.sp > 0;
 
       drawButton(btnAttack, atkName, atkActive, state.isEnhanced);
-      drawButton(btnSkill, skillName, skillActive, state.isEnhanced);
+      drawButton(btnSkill, skillName, skillActive, state.isEnhanced, !canSkill);
       if (!state.isEnhanced)
         drawButton(btnUltimate, ultName, ultActive, false, !canUlt);
     }

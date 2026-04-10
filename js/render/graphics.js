@@ -48,14 +48,17 @@ export function drawTextWithCA(
 
   if (strokeColor && strokeWidth > 0) {
     ctx.lineWidth = strokeWidth;
-    ctx.strokeStyle = "rgba(255, 50, 50, 0.4)";
+    // PURGED: Replaced Red/Cyan with Nier Dark/Light
+    ctx.strokeStyle = "rgba(71, 68, 59, 0.4)";
     ctx.strokeText(text, x - 1.5, y);
-    ctx.strokeStyle = "rgba(50, 200, 255, 0.4)";
+    ctx.strokeStyle = "rgba(215, 207, 184, 0.4)";
     ctx.strokeText(text, x + 1.5, y);
   }
-  ctx.fillStyle = "rgba(255, 50, 50, 0.5)";
+
+  // PURGED: Replaced Red/Cyan with Nier Dark/Light
+  ctx.fillStyle = "rgba(71, 68, 59, 0.5)";
   ctx.fillText(text, x - 1.5, y);
-  ctx.fillStyle = "rgba(50, 200, 255, 0.5)";
+  ctx.fillStyle = "rgba(215, 207, 184, 0.5)";
   ctx.fillText(text, x + 1.5, y);
 
   ctx.shadowColor = sColor;
@@ -76,12 +79,15 @@ export function strokeWithCA(mainColor, lineWidth) {
   ctx.save();
   ctx.shadowColor = "transparent";
   ctx.lineWidth = lineWidth;
+
+  // PURGED: Replaced Red/Cyan with Nier Dark/Light
   ctx.translate(-1.5, 0);
-  ctx.strokeStyle = "rgba(255, 50, 50, 0.3)";
+  ctx.strokeStyle = "rgba(71, 68, 59, 0.3)";
   ctx.stroke();
   ctx.translate(3, 0);
-  ctx.strokeStyle = "rgba(50, 200, 255, 0.3)";
+  ctx.strokeStyle = "rgba(215, 207, 184, 0.3)";
   ctx.stroke();
+
   ctx.restore();
   ctx.lineWidth = lineWidth;
   ctx.strokeStyle = mainColor;
