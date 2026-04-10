@@ -27,6 +27,7 @@ export const state = {
     floatingTexts: [],
     dataStrings: [],
     shockwaves: [],
+    totalDamage: { value: 0, life: 0 },
   },
 };
 

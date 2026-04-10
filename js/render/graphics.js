@@ -48,14 +48,13 @@ export function drawTextWithCA(
 
   if (strokeColor && strokeWidth > 0) {
     ctx.lineWidth = strokeWidth;
-    // PURGED: Replaced Red/Cyan with Nier Dark/Light
+    // --- PURGED: Neon Red/Cyan replaced with Dark/Light monochrome ---
     ctx.strokeStyle = "rgba(71, 68, 59, 0.4)";
     ctx.strokeText(text, x - 1.5, y);
     ctx.strokeStyle = "rgba(215, 207, 184, 0.4)";
     ctx.strokeText(text, x + 1.5, y);
   }
 
-  // PURGED: Replaced Red/Cyan with Nier Dark/Light
   ctx.fillStyle = "rgba(71, 68, 59, 0.5)";
   ctx.fillText(text, x - 1.5, y);
   ctx.fillStyle = "rgba(215, 207, 184, 0.5)";
@@ -79,9 +78,9 @@ export function strokeWithCA(mainColor, lineWidth) {
   ctx.save();
   ctx.shadowColor = "transparent";
   ctx.lineWidth = lineWidth;
-
-  // PURGED: Replaced Red/Cyan with Nier Dark/Light
   ctx.translate(-1.5, 0);
+
+  // --- PURGED: Neon Red/Cyan replaced with Dark/Light monochrome ---
   ctx.strokeStyle = "rgba(71, 68, 59, 0.3)";
   ctx.stroke();
   ctx.translate(3, 0);

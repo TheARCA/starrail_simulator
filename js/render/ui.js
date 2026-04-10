@@ -3,6 +3,7 @@ import {
   state,
   mouse,
   GAME_WIDTH,
+  GAME_HEIGHT,
   UI_PANEL,
   btnAttack,
   btnSkill,
@@ -237,10 +238,23 @@ export function drawActionBar() {
     clearShadow();
     ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
     ctx.fill();
-    strokeWithCA(
-      isActive ? NIER_DARK : "rgba(71, 68, 59, 0.4)",
-      isActive ? 2 : 1,
-    );
+
+    // --- JUICE: Active Unit Pulse & Arrow ---
+    if (isActive) {
+      const pulse = 0.5 + Math.abs(Math.sin(performance.now() / 200)) * 0.5;
+      strokeWithCA(NIER_DARK, 1 + pulse * 2);
+
+      // Draw a sharp geometric arrow pointing to the active unit
+      ctx.fillStyle = NIER_DARK;
+      ctx.beginPath();
+      ctx.moveTo(startX - 6, yPos + 22.5);
+      ctx.lineTo(startX - 16, yPos + 14.5);
+      ctx.lineTo(startX - 16, yPos + 30.5);
+      ctx.fill();
+    } else {
+      strokeWithCA("rgba(71, 68, 59, 0.4)", 1);
+    }
+
     ctx.fillStyle = isPlayer ? NIER_DARK : "rgba(71, 68, 59, 0.5)";
     drawChamferedRect(startX + xOffset + 6, yPos + 6, 33, 33, 4);
     ctx.fill();
@@ -357,6 +371,81 @@ function drawSkillPoints() {
   ctx.restore();
 }
 
+export function drawTotalDamage() {
+  if (state.fx.totalDamage.life <= 0 || state.fx.totalDamage.value <= 0) return;
+
+  ctx.save();
+  const life = state.fx.totalDamage.life;
+  ctx.globalAlpha = Math.min(1, life * 2); // Smooth fade out
+
+  const boxW = 240;
+  const boxH = 85;
+
+  // --- JUICE 1: Sharp kinetic slide-in from the right edge ---
+  const slideOffset = life > 2.3 ? Math.pow((life - 2.3) * 5, 2) * 20 : 0;
+  const startX = GAME_WIDTH - boxW - 50 + slideOffset;
+  const startY = GAME_HEIGHT / 2 - 80;
+
+  // Heavy impact scale bounce
+  let scale = 1.0;
+  if (life > 2.3) scale = 1.0 + (life - 2.3) * 0.2;
+
+  ctx.translate(startX + boxW / 2, startY + boxH / 2);
+  ctx.scale(scale, scale);
+  ctx.translate(-(startX + boxW / 2), -(startY + boxH / 2));
+
+  // The base dark box
+  applyHardShadow();
+  ctx.fillStyle = "rgba(71, 68, 59, 0.85)";
+  drawChamferedRect(startX, startY, boxW, boxH, 15);
+  ctx.fill();
+  clearShadow();
+  strokeWithCA(NIER_LIGHT, 2);
+
+  // --- JUICE 2: The "Processing Impact" Flash ---
+  // Briefly inverts the box color when a new hit lands
+  if (life > 2.4) {
+    ctx.fillStyle = "rgba(215, 207, 184, 0.85)";
+    drawChamferedRect(startX, startY, boxW, boxH, 15);
+    ctx.fill();
+  }
+
+  // --- JUICE 3: Geometric Target Brackets ---
+  ctx.beginPath();
+  // Top Left Bracket
+  ctx.moveTo(startX - 8, startY + 20);
+  ctx.lineTo(startX - 8, startY - 8);
+  ctx.lineTo(startX + 20, startY - 8);
+  // Bottom Right Bracket
+  ctx.moveTo(startX + boxW + 8, startY + boxH - 20);
+  ctx.lineTo(startX + boxW + 8, startY + boxH + 8);
+  ctx.lineTo(startX + boxW - 20, startY + boxH + 8);
+  strokeWithCA(NIER_DARK, 3);
+
+  // --- JUICE 4: Scanning Data Line ---
+  const scanY = startY + ((performance.now() / 15) % boxH);
+  ctx.fillStyle = "rgba(215, 207, 184, 0.15)";
+  ctx.fillRect(startX, scanY, boxW, 4);
+
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+
+  // If the box is flashing, we must invert the text colors too!
+  const titleColor = life > 2.4 ? NIER_DARK : "rgba(215, 207, 184, 0.7)";
+  const dmgColor = life > 2.4 ? NIER_DARK : NIER_LIGHT;
+
+  ctx.font = "800 16px 'NewRodin', sans-serif";
+  ctx.letterSpacing = "2px";
+  drawTextWithCA("TOTAL DMG", startX + boxW - 20, startY + 25, titleColor);
+  ctx.letterSpacing = "0px";
+
+  ctx.font = "800 46px 'NewRodin', sans-serif";
+  const formattedDmg = Math.floor(state.fx.totalDamage.value).toLocaleString();
+  drawTextWithCA(formattedDmg, startX + boxW - 20, startY + 60, dmgColor);
+
+  ctx.restore();
+}
+
 export function drawUI() {
   ctx.save();
   applyHardShadow();
@@ -368,14 +457,14 @@ export function drawUI() {
   drawChamferedRect(UI_PANEL.x, UI_PANEL.y, UI_PANEL.w, UI_PANEL.h, 30);
   strokeWithCA("rgba(71, 68, 59, 0.3)", 1);
 
-  ctx.fillStyle = "rgba(71, 68, 59, 0.2)";
-  for (let i = 0; i < 40; i++)
-    ctx.fillRect(
-      UI_PANEL.x + 40 + i * 6,
-      UI_PANEL.y - 12,
-      3,
-      Math.random() * 8 + 4,
-    );
+  ctx.fillStyle = "rgba(71, 68, 59, 0.3)";
+  const time = performance.now() / 200;
+  for (let i = 0; i < 40; i++) {
+    let h =
+      4 +
+      Math.abs(Math.sin(time + i * 0.3) * Math.cos(time * 2.5 + i * 0.1)) * 14;
+    ctx.fillRect(UI_PANEL.x + 40 + i * 6, UI_PANEL.y - 12 - h + 8, 3, h);
+  }
 
   if (state.current === STATES.PLAYER_TURN) {
     drawSkillPoints();
@@ -444,6 +533,27 @@ export function drawButton(
     ctx.fill();
     strokeWithCA("rgba(71, 68, 59, 0.4)", 1);
     textColor = NIER_DARK;
+  }
+
+  // --- JUICE: Kinetic Target Brackets ---
+  if ((hovered && isActive && !isDisabled && !forceActive) || forceActive) {
+    // A slight breathing animation on the brackets
+    const offset = 10 + Math.abs(Math.sin(performance.now() / 150)) * 3;
+    ctx.fillStyle = NIER_DARK;
+
+    // Left target triangle
+    ctx.beginPath();
+    ctx.moveTo(btn.x - offset, renderY + btn.h / 2);
+    ctx.lineTo(btn.x - (offset + 6), renderY + btn.h / 2 - 6);
+    ctx.lineTo(btn.x - (offset + 6), renderY + btn.h / 2 + 6);
+    ctx.fill();
+
+    // Right target triangle
+    ctx.beginPath();
+    ctx.moveTo(btn.x + btn.w + offset, renderY + btn.h / 2);
+    ctx.lineTo(btn.x + btn.w + (offset + 6), renderY + btn.h / 2 - 6);
+    ctx.lineTo(btn.x + btn.w + (offset + 6), renderY + btn.h / 2 + 6);
+    ctx.fill();
   }
 
   ctx.textAlign = "center";

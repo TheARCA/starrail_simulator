@@ -154,8 +154,8 @@ export function updateFXPhysics() {
   state.fx.shake *= 0.85;
   if (state.fx.flash > 0) state.fx.flash -= 0.05;
   if (state.fx.invert > 0) state.fx.invert -= 1;
+  if (state.fx.totalDamage.life > 0) state.fx.totalDamage.life -= 0.02;
 
-  // --- RING BUFFER TICK: We no longer use .splice()! Just skip dead objects.
   for (let i = 0; i < state.fx.shockwaves.length; i++) {
     let sw = state.fx.shockwaves[i];
     if (sw.life <= 0) continue;
@@ -192,4 +192,14 @@ export function updateFXPhysics() {
     t.vy *= 0.95;
     t.life -= 0.015;
   }
+}
+
+export function resetTotalDamage() {
+  state.fx.totalDamage.value = 0;
+  state.fx.totalDamage.life = 0;
+}
+
+export function addTotalDamage(amount) {
+  state.fx.totalDamage.value += amount;
+  state.fx.totalDamage.life = 2.5;
 }

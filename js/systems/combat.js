@@ -2,7 +2,12 @@ import { STATES, state } from "../core/state.js";
 import { party } from "../data/hero_db.js";
 import { enemies } from "../data/enemy_db.js";
 import { calculateDamage } from "../utils/math.js";
-import { spawnJuice, spawnDeathExplosion } from "./fx_manager.js";
+import {
+  spawnJuice,
+  spawnDeathExplosion,
+  resetTotalDamage,
+  addTotalDamage,
+} from "./fx_manager.js";
 import {
   playAttackDash,
   playHeavyHit,
@@ -41,6 +46,8 @@ export async function executeCombatSequence(action, attacker) {
   }
 
   state.activeSkillName = moveData.name;
+  resetTotalDamage(); // <--- NEW: Clear the old number before we attack
+  await sleep(500);
 
   // --- NEW: SKILL POINT CONSUMPTION & GENERATION ---
   if (!state.isEnhanced) {
@@ -115,6 +122,56 @@ export async function executeCombatSequence(action, attacker) {
         isAnyBreak = true;
         const breakDelayAV = 2500 / (e.spd || 100);
         e.av += breakDelayAV;
+
+        // --- NEW: ELEMENTAL DEBUFF APPLICATION ---
+        e.debuffs = e.debuffs || [];
+        const element = attacker.element || "Physical";
+        const lvlDmg = 50; // Base damage for breaks
+
+        let dName = "BLEED",
+          dType = "DoT",
+          dDur = 2,
+          dDmg = lvlDmg * 2;
+        if (element === "Fire") {
+          dName = "BURN";
+          dDmg = lvlDmg * 1.5;
+        } else if (element === "Wind") {
+          dName = "WIND SHEAR";
+          dDmg = lvlDmg * 1.5;
+        } else if (element === "Lightning") {
+          dName = "SHOCK";
+          dDmg = lvlDmg * 2;
+        } else if (element === "Ice") {
+          dName = "FREEZE";
+          dType = "Disable";
+          dDur = 1;
+          dDmg = lvlDmg;
+        } else if (element === "Quantum") {
+          dName = "ENTANGLEMENT";
+          dType = "Delay";
+          dDur = 1;
+          dDmg = lvlDmg * 2;
+        } else if (element === "Imaginary") {
+          dName = "IMPRISONMENT";
+          dType = "Delay";
+          dDur = 1;
+          dDmg = 0;
+          e.av += breakDelayAV * 1.5;
+        }
+
+        // Refresh duration if it already exists, otherwise add it
+        let existing = e.debuffs.find((db) => db.name === dName);
+        if (existing) {
+          existing.duration = dDur;
+          existing.damage = Math.max(existing.damage, dDmg);
+        } else {
+          e.debuffs.push({
+            name: dName,
+            type: dType,
+            duration: dDur,
+            damage: dDmg,
+          });
+        }
       }
     }
 
@@ -125,18 +182,22 @@ export async function executeCombatSequence(action, attacker) {
       isBreakHit,
       t.isCritHit,
     );
+
     t.finalDamage = normalDamage + breakDamage;
+
+    addTotalDamage(t.finalDamage);
 
     if (isBreakHit) {
       spawnJuice(e, "WEAKNESS BREAK", true, 30, "#d7cfb8");
-      playBreak(); // <--- NEW: Shattering sound!
+      playBreak();
     } else {
-      playHeavyHit(); // <--- NEW: Normal thud sound
+      playHeavyHit();
     }
 
     spawnJuice(e, normalDamage, t.isCritHit, moveData.shake, moveData.color);
+
     if (breakDamage > 0)
-      setTimeout(() => spawnJuice(e, breakDamage, true, 40, "#FF3333"), 100);
+      setTimeout(() => spawnJuice(e, breakDamage, true, 40, "#47443b"), 100);
   });
 
   const anyCrit = hitTargets.some((t) => t.isCritHit);
@@ -255,4 +316,48 @@ export async function enemyAction(attacker) {
 
   await sleep(400);
   state.isAnimating = false;
+}
+
+// --- NEW: PROCESS EFFECTS AT THE START OF A TURN ---
+export async function processTurnStart(unit) {
+  if (!unit.debuffs || unit.debuffs.length === 0) return true;
+
+  state.isAnimating = true;
+  let dotDamageTotal = 0;
+  let skipTurn = false;
+
+  // Iterate backwards so we can safely splice expired debuffs
+  for (let i = unit.debuffs.length - 1; i >= 0; i--) {
+    let d = unit.debuffs[i];
+
+    if (
+      d.damage &&
+      (d.type === "DoT" || d.name === "FREEZE" || d.name === "ENTANGLEMENT")
+    ) {
+      dotDamageTotal += d.damage;
+      // Monochrome juice for DoT ticks
+      spawnJuice(unit, Math.floor(d.damage), false, 15, "#47443b");
+    }
+
+    if (d.name === "FREEZE") {
+      skipTurn = true;
+      unit.av = 5000 / (unit.spd || 100); // 50% action advance on unfreeze
+    }
+
+    d.duration -= 1;
+    if (d.duration <= 0) unit.debuffs.splice(i, 1);
+  }
+
+  if (dotDamageTotal > 0) {
+    unit.hp = Math.max(0, unit.hp - dotDamageTotal);
+    playHeavyHit();
+    if (unit.hp <= 0) {
+      spawnDeathExplosion(unit);
+      skipTurn = true; // Dead units don't take turns!
+    }
+    await sleep(500); // Let the player see the DoT damage numbers before the turn actually begins
+  }
+
+  state.isAnimating = false;
+  return !skipTurn; // Returns true if the unit survived and can act
 }

@@ -28,6 +28,7 @@ import {
   drawActionBar,
   drawUI,
   drawActiveSkillBanner,
+  drawTotalDamage,
 } from "./ui.js";
 
 const spritePlaceholder = new Image();
@@ -338,6 +339,26 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
         );
       }
     }
+    if (entity.debuffs && entity.debuffs.length > 0) {
+      const tagY = y + CARD_SIZE + 18;
+
+      entity.debuffs.forEach((d, index) => {
+        // Draw a faint technical background
+        ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
+        ctx.fillRect(x + 5, tagY + index * 14, CARD_SIZE - 10, 12);
+
+        // Draw the Debuff Name and remaining Duration
+        ctx.font = "600 8px 'NewRodin', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        drawTextWithCA(
+          `${d.name} (${d.duration})`,
+          x + CARD_SIZE / 2,
+          tagY + 6 + index * 14,
+          "#47443b",
+        );
+      });
+    }
   } else {
     ctx.font = "400 16px 'NewRodin', sans-serif";
     ctx.textAlign = "center";
@@ -563,6 +584,7 @@ function render() {
     drawActionBar();
     drawUI();
     drawActiveSkillBanner();
+    drawTotalDamage();
 
     if (state.fx.flash > 0) {
       ctx.fillStyle = `rgba(255, 255, 255, ${state.fx.flash})`;
