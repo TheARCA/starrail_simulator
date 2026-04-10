@@ -2,8 +2,6 @@ import {
   STATES,
   state,
   mouse,
-  GAME_WIDTH,
-  GAME_HEIGHT,
   CARD_SIZE,
   btnAttack,
   btnSkill,
@@ -13,22 +11,15 @@ import {
 } from "../core/state.js";
 import { DATABASE_HEROES, party } from "../data/hero_db.js";
 import { DATABASE_ENEMIES, enemies } from "../data/enemy_db.js";
+import { initAudio, playUIClick } from "./sound.js";
+import { isInside, getMenuRect } from "../render/ui.js";
 
-// Helper functions for checking UI bounds
-function isInside(x, y, rect) {
-  return x > rect.x && x < rect.x + rect.w && y > rect.y && y < rect.y + rect.h;
-}
-
-function getMenuRect(index, total, startY) {
-  const w = 240;
-  const h = 70;
-  const spacing = 30;
-  const totalW = total * w + (total - 1) * spacing;
-  const startX = (GAME_WIDTH - totalW) / 2;
-  return { x: startX + index * (w + spacing), y: startY, w, h };
-}
+let isInitialized = false;
 
 export function initInputs(onStartBattle, onExecuteCombat) {
+  if (isInitialized) return;
+  isInitialized = true;
+
   const canvas = document.getElementById("gameCanvas");
 
   // Track Mouse Position
@@ -47,6 +38,9 @@ export function initInputs(onStartBattle, onExecuteCombat) {
     const scaleY = canvas.height / rect.height;
     mouse.x = (e.clientX - rect.left) * scaleX;
     mouse.y = (e.clientY - rect.top) * scaleY;
+
+    initAudio();
+    playUIClick();
 
     if (state.current === STATES.MAIN_MENU) {
       DATABASE_HEROES.forEach((hero, i) => {
@@ -140,7 +134,11 @@ export function initInputs(onStartBattle, onExecuteCombat) {
 
   // Handle Keyboard Shortcuts
   window.addEventListener("keydown", (e) => {
+    initAudio();
+
     if (state.current !== STATES.PLAYER_TURN || state.isAnimating) return;
+
+    playUIClick(); // Play beep for valid combat hotkeys
 
     const key = e.key.toLowerCase();
     const aliveEnemies = enemies.filter((en) => en.hp > 0);

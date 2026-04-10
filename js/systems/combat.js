@@ -1,14 +1,14 @@
-import {
-  STATES,
-  state,
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  CARD_SIZE,
-} from "../core/state.js";
+import { STATES, state } from "../core/state.js";
 import { party } from "../data/hero_db.js";
 import { enemies } from "../data/enemy_db.js";
 import { calculateDamage } from "../utils/math.js";
 import { spawnJuice, spawnDeathExplosion } from "./fx_manager.js";
+import {
+  playAttackDash,
+  playHeavyHit,
+  playBreak,
+  playUltimateCharge,
+} from "./sound.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -35,7 +35,10 @@ export async function executeCombatSequence(action, attacker) {
   }
 
   const isCinematic = action === "ULTIMATE" || state.isEnhanced;
-  if (isCinematic) state.fx.cinematic = true;
+  if (isCinematic) {
+    state.fx.cinematic = true;
+    playUltimateCharge(); // <--- NEW
+  }
 
   state.activeSkillName = moveData.name;
   await sleep(500);
@@ -64,6 +67,7 @@ export async function executeCombatSequence(action, attacker) {
   attacker.targetOffsetY = isCinematic ? -180 : action === "SKILL" ? -120 : -80;
   attacker.targetScale = isCinematic ? 1.3 : 1.15;
   attacker.targetRotation = 0.08;
+  playAttackDash();
   await sleep(100);
 
   const targetIndex = aliveEnemies.findIndex((e) => e.id === target.id);
@@ -113,7 +117,13 @@ export async function executeCombatSequence(action, attacker) {
     );
     t.finalDamage = normalDamage + breakDamage;
 
-    if (isBreakHit) spawnJuice(e, "WEAKNESS BREAK", true, 30, "#d7cfb8");
+    if (isBreakHit) {
+      spawnJuice(e, "WEAKNESS BREAK", true, 30, "#d7cfb8");
+      playBreak(); // <--- NEW: Shattering sound!
+    } else {
+      playHeavyHit(); // <--- NEW: Normal thud sound
+    }
+
     spawnJuice(e, normalDamage, t.isCritHit, moveData.shake, moveData.color);
     if (breakDamage > 0)
       setTimeout(() => spawnJuice(e, breakDamage, true, 40, "#FF3333"), 100);
