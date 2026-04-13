@@ -40,18 +40,21 @@ function getEntityImage(entity, isEnemy) {
   const img = new Image();
   const folder = isEnemy ? "enemies" : "characters";
 
+  // --- THE FIX: Strip the unique spawn ID suffix to get the base filename ---
+  // This turns "e_baryon_1776105780056_605" back into "e_baryon"
+  const baseImageId = entity.id.replace(/_\d+_\d+$/, "");
+
   const extensions = ["png", "webp", "jpg", "jpeg"];
   let currentExtIndex = 0;
 
-  img.src = `assets/img/${folder}/${entity.id}.${extensions[currentExtIndex]}`;
+  img.src = `assets/img/${folder}/${baseImageId}.${extensions[currentExtIndex]}`;
 
   img.onerror = () => {
     currentExtIndex++;
 
     if (currentExtIndex < extensions.length) {
-      img.src = `assets/img/${folder}/${entity.id}.${extensions[currentExtIndex]}`;
+      img.src = `assets/img/${folder}/${baseImageId}.${extensions[currentExtIndex]}`;
     } else {
-      // NEW: Instead of a gray box URL, we flag it so the renderer knows to draw it natively
       img.isPlaceholder = true;
     }
   };
@@ -269,17 +272,14 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   // --- 4. PORTRAIT ---
   const portraitImg = getEntityImage(entity, isEnemy);
 
-  // Calculate portrait box dimensions and chamfer cut
   const px = x + 4;
   const py = y + 4;
   const pw = cardWidth - 8;
   const ph = cardWidth - 8;
   const cut = 8;
 
-  // Save canvas state before clipping
   ctx.save();
 
-  // Create chamfered clipping path for portrait
   ctx.beginPath();
   ctx.moveTo(px + cut, py);
   ctx.lineTo(px + pw, py);
@@ -289,27 +289,29 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   ctx.closePath();
   ctx.clip();
 
-  // --- DRAW CONTENT INSIDE CLIP ---
-  if (portraitImg.isPlaceholder) {
-    // Draw placeholder background
+  // --- THE FIX: Draw DATA while loading OR if it's missing ---
+  if (
+    portraitImg.complete &&
+    portraitImg.naturalHeight !== 0 &&
+    !portraitImg.isPlaceholder
+  ) {
+    // Only draw the image if it has 100% finished downloading and isn't a placeholder
+    ctx.globalAlpha = 0.95;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(portraitImg, px, py, pw, ph);
+  } else {
+    // Draw the native placeholder as the default "loading" state
     ctx.fillStyle = "#47443b";
     ctx.fillRect(px, py, pw, ph);
 
-    // Draw centered placeholder text
     ctx.fillStyle = "#d7cfb8";
     ctx.font = "800 14px 'NewRodin', sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("DATA", px + pw / 2, py + ph / 2);
-  } else if (portraitImg.complete && portraitImg.naturalHeight !== 0) {
-    // Draw portrait image
-    ctx.globalAlpha = 0.95;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(portraitImg, px, py, pw, ph);
   }
 
-  // Restore canvas state after drawing
   ctx.restore();
 
   // --- 5. ENEMY WEAKNESSES (Docked Top-Right) ---
