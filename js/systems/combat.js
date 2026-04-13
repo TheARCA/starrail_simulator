@@ -1,7 +1,7 @@
 import { STATES, state } from "../core/state.js";
 import { party } from "../data/hero_db.js";
 import { enemies } from "../data/enemy_db.js";
-import { calculateDamage } from "../utils/math.js";
+import { calculateDamage, calculateBreakDoT } from "../utils/math.js";
 import {
   spawnJuice,
   spawnDeathExplosion,
@@ -120,56 +120,57 @@ export async function executeCombatSequence(action, attacker) {
         e.isBroken = true;
         isBreakHit = true;
         isAnyBreak = true;
-        const breakDelayAV = 2500 / (e.spd || 100);
-        e.av += breakDelayAV;
 
-        // --- NEW: ELEMENTAL DEBUFF APPLICATION ---
-        e.debuffs = e.debuffs || [];
+        const breakEffect = attacker.breakEffect || 0;
         const element = attacker.element || "Physical";
-        const lvlDmg = 50; // Base damage for breaks
+        const isElite = e.isElite || false;
+
+        let actualDelay = 2500 / (e.spd || 100); // Normal 25% action delay
+        e.debuffs = e.debuffs || [];
 
         let dName = "BLEED",
           dType = "DoT",
           dDur = 2,
-          dDmg = lvlDmg * 2;
+          dStacks = 1;
+
         if (element === "Fire") {
           dName = "BURN";
-          dDmg = lvlDmg * 1.5;
         } else if (element === "Wind") {
           dName = "WIND SHEAR";
-          dDmg = lvlDmg * 1.5;
+          dStacks = isElite ? 3 : 1; // Elites get 3 stacks of Wind Shear instantly
         } else if (element === "Lightning") {
           dName = "SHOCK";
-          dDmg = lvlDmg * 2;
         } else if (element === "Ice") {
           dName = "FREEZE";
           dType = "Disable";
           dDur = 1;
-          dDmg = lvlDmg;
         } else if (element === "Quantum") {
           dName = "ENTANGLEMENT";
           dType = "Delay";
           dDur = 1;
-          dDmg = lvlDmg * 2;
+          actualDelay = (2000 * (1 + breakEffect)) / (e.spd || 100); // Exact 20% * (1+BE) delay
         } else if (element === "Imaginary") {
           dName = "IMPRISONMENT";
           dType = "Delay";
           dDur = 1;
-          dDmg = 0;
-          e.av += breakDelayAV * 1.5;
+          actualDelay = (3000 * (1 + breakEffect)) / (e.spd || 100); // Exact 30% * (1+BE) delay
+          e.spd = (e.spd || 100) * 0.9; // Exact 10% SPD reduction
         }
 
-        // Refresh duration if it already exists, otherwise add it
+        e.av += actualDelay;
+
         let existing = e.debuffs.find((db) => db.name === dName);
         if (existing) {
           existing.duration = dDur;
-          existing.damage = Math.max(existing.damage, dDmg);
+          if (element === "Wind")
+            existing.stacks = Math.min(5, (existing.stacks || 1) + dStacks);
         } else {
           e.debuffs.push({
             name: dName,
             type: dType,
             duration: dDur,
-            damage: dDmg,
+            stacks: dStacks,
+            attacker: attacker,
           });
         }
       }
@@ -206,7 +207,14 @@ export async function executeCombatSequence(action, attacker) {
   hitTargets.forEach((t) => {
     t.enemy.hp = Math.max(0, t.enemy.hp - t.finalDamage);
     if (t.enemy.hp <= 0) spawnDeathExplosion(t.enemy);
+
+    if (t.enemy.debuffs && t.enemy.hp > 0) {
+      let entang = t.enemy.debuffs.find((db) => db.name === "ENTANGLEMENT");
+      if (entang) entang.stacks = Math.min(5, (entang.stacks || 1) + 1);
+    }
   });
+
+  validateTargetSelection();
 
   if (isAnyBreak) await sleep(200);
 
@@ -236,7 +244,21 @@ export async function enemyAction(attacker) {
 
   state.isAnimating = true;
 
-  const target = aliveParty[Math.floor(Math.random() * aliveParty.length)];
+  const totalAggro = aliveParty.reduce((sum, p) => sum + (p.aggro || 100), 0);
+
+  // Roll a random number between 0 and the total aggro
+  let randomRoll = Math.random() * totalAggro;
+
+  // Subtract aggro from the roll until we hit a character
+  let target = aliveParty[0]; // Safe fallback
+  for (const hero of aliveParty) {
+    const heroAggro = hero.aggro || 100; // Default to 100 if missing
+    if (randomRoll < heroAggro) {
+      target = hero;
+      break;
+    }
+    randomRoll -= heroAggro;
+  }
   const logicKeys = Object.keys(attacker.combatLogic || {});
   const moveKey = logicKeys[Math.floor(Math.random() * logicKeys.length)];
   const attackLogic = attacker.combatLogic[moveKey] ||
@@ -318,7 +340,7 @@ export async function enemyAction(attacker) {
   state.isAnimating = false;
 }
 
-// --- NEW: PROCESS EFFECTS AT THE START OF A TURN ---
+// --- EXACT PROCESS EFFECTS ---
 export async function processTurnStart(unit) {
   if (!unit.debuffs || unit.debuffs.length === 0) return true;
 
@@ -326,22 +348,26 @@ export async function processTurnStart(unit) {
   let dotDamageTotal = 0;
   let skipTurn = false;
 
-  // Iterate backwards so we can safely splice expired debuffs
   for (let i = unit.debuffs.length - 1; i >= 0; i--) {
     let d = unit.debuffs[i];
 
-    if (
-      d.damage &&
-      (d.type === "DoT" || d.name === "FREEZE" || d.name === "ENTANGLEMENT")
-    ) {
-      dotDamageTotal += d.damage;
-      // Monochrome juice for DoT ticks
-      spawnJuice(unit, Math.floor(d.damage), false, 15, "#47443b");
+    if (d.type === "DoT" || d.name === "FREEZE" || d.name === "ENTANGLEMENT") {
+      // DYNAMIC CALCULATION: Calculates exact damage using the attacker's saved stats!
+      const exactDamage = calculateBreakDoT(d.attacker || unit, unit, d);
+
+      if (exactDamage > 0) {
+        dotDamageTotal += exactDamage;
+        spawnJuice(unit, Math.floor(exactDamage), false, 15, "#47443b");
+      }
     }
 
     if (d.name === "FREEZE") {
       skipTurn = true;
-      unit.av = 5000 / (unit.spd || 100); // 50% action advance on unfreeze
+      unit.av = 5000 / (unit.spd || 100); // Exact 50% Action Advance on Unfreeze
+    }
+
+    if (d.name === "IMPRISONMENT" && d.duration === 1) {
+      unit.spd = (unit.spd || 90) / 0.9; // Restore 10% SPD when Imprisonment fades
     }
 
     d.duration -= 1;
@@ -354,10 +380,44 @@ export async function processTurnStart(unit) {
     if (unit.hp <= 0) {
       spawnDeathExplosion(unit);
       skipTurn = true; // Dead units don't take turns!
+      validateTargetSelection(); // <--- ADD THIS HERE TOO
     }
-    await sleep(500); // Let the player see the DoT damage numbers before the turn actually begins
+    await sleep(500);
   }
 
   state.isAnimating = false;
-  return !skipTurn; // Returns true if the unit survived and can act
+  return !skipTurn;
+}
+
+// --- NEW: INTELLIGENT TARGET REASSIGNMENT ---
+function validateTargetSelection() {
+  const aliveEnemies = enemies.filter((e) => e.hp > 0);
+  if (aliveEnemies.length === 0) return;
+
+  const isTargetAlive = aliveEnemies.some(
+    (e) => e.id === state.selectedTargetId,
+  );
+
+  if (!isTargetAlive) {
+    const oldTargetIndex = enemies.findIndex(
+      (e) => e.id === state.selectedTargetId,
+    );
+
+    // Try to find the closest alive enemy to the right
+    let nextTarget = enemies.find((e, idx) => e.hp > 0 && idx > oldTargetIndex);
+
+    // If none to the right, try finding the closest to the left
+    if (!nextTarget) {
+      const reversedEnemies = [...enemies].reverse();
+      nextTarget = reversedEnemies.find(
+        (e, idx) => e.hp > 0 && enemies.length - 1 - idx < oldTargetIndex,
+      );
+    }
+
+    if (nextTarget) {
+      state.selectedTargetId = nextTarget.id;
+    } else {
+      state.selectedTargetId = aliveEnemies[0].id; // Safe fallback
+    }
+  }
 }

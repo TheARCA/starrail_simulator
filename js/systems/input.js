@@ -114,22 +114,50 @@ export function initInputs(onStartBattle, onExecuteCombat) {
       return;
     }
 
+    // --- NEW: HOLD LOGIC FOR BUTTONS (Starts the timer) ---
     if (isInside(mouse.x, mouse.y, btnAttack)) {
-      state.pendingAction = "ATTACK";
+      mouse.heldAction = "ATTACK";
+      mouse.holdStart = performance.now();
     } else if (isInside(mouse.x, mouse.y, btnSkill)) {
-      // --- FIXED: Only allow skill selection if SP is available!
-      if (state.sp > 0) state.pendingAction = "SKILL";
+      if (state.sp > 0) {
+        mouse.heldAction = "SKILL";
+        mouse.holdStart = performance.now();
+      }
     } else if (isInside(mouse.x, mouse.y, btnUltimate) && !state.isEnhanced) {
       const ultCost = activeChar.combatLogic.ultimate.cost || 120;
       if (activeChar.energy >= ultCost) {
-        if (activeChar.combatLogic.ultimate.tag === "Enhance") {
-          state.isEnhanced = true;
-          activeChar.energy -= ultCost;
-          state.fx.flash = 0.4;
-        } else {
-          state.pendingAction = "ULTIMATE";
+        mouse.heldAction = "ULTIMATE";
+        mouse.holdStart = performance.now();
+      }
+    }
+  });
+
+  // --- NEW: MOUSE UP HANDLER (Executes action if tapped quickly) ---
+  canvas.addEventListener("mouseup", (e) => {
+    mouse.isDown = false;
+
+    if (mouse.heldAction) {
+      const holdDuration = performance.now() - mouse.holdStart;
+      if (holdDuration < 300) {
+        const activeChar =
+          party.find((p) => p.id === state.activeUnitId) || party[0];
+
+        if (mouse.heldAction === "ATTACK") {
+          state.pendingAction = "ATTACK";
+        } else if (mouse.heldAction === "SKILL") {
+          state.pendingAction = "SKILL";
+        } else if (mouse.heldAction === "ULTIMATE") {
+          const ultCost = activeChar.combatLogic.ultimate.cost || 120;
+          if (activeChar.combatLogic.ultimate.tag === "Enhance") {
+            state.isEnhanced = true;
+            activeChar.energy -= ultCost;
+            state.fx.flash = 0.4;
+          } else {
+            state.pendingAction = "ULTIMATE";
+          }
         }
       }
+      mouse.heldAction = null;
     }
   });
 

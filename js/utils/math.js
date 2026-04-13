@@ -98,6 +98,12 @@ export const LEVEL_MULTIPLIER = {
   95: 7494.3713,
 };
 
+export function getBaseBreakDamage(attackerLevel, maxToughness) {
+  const lvlMultiplier = LEVEL_MULTIPLIER[attackerLevel] || LEVEL_MULTIPLIER[1];
+  const maxToughnessMultiplier = 0.5 + maxToughness / 40;
+  return lvlMultiplier * maxToughnessMultiplier;
+}
+
 export function calculateDamage(
   attacker,
   target,
@@ -109,11 +115,8 @@ export function calculateDamage(
   const enemyLevel = target.level || 1;
   const atk = attacker.atk || 0;
   const element = attacker.element || "Physical";
-
-  // Uses baseToughness initialized in visual.js, or falls back to current toughness
   const maxToughness = target.baseToughness || target.toughness || 30;
 
-  // --- 0. EXTRACT STATS & BUFFS/DEBUFFS (Defaults to 0) ---
   const dmgBoost = attacker.dmgBoost || 0;
   const weaken = attacker.weaken || 0;
   const defBonus = target.defBonus || 0;
@@ -122,44 +125,33 @@ export function calculateDamage(
   const resPen = attacker.resPen || 0;
   const vulnerability = target.vulnerability || 0;
   const dmgMitigation = target.dmgMitigation || 0;
+  const breakEffect = attacker.breakEffect || 0; // --- NEW: Break Effect
 
-  // --- 1. CRIT MULTIPLIER ---
-  const critDmg = attacker.critDmg || 0.5; // Base 50%
+  const critDmg = attacker.critDmg || 0.5;
   const critMultiplier = isCritHit ? 1 + critDmg : 1.0;
-
-  // --- 2. DMG BOOST MULTIPLIER ---
   const boostMultiplier = 1 + dmgBoost - weaken;
 
-  // --- 3. DEF MULTIPLIER ---
   const defScaling = Math.max(0, 1 + defBonus - defReduction - defIgnore);
-  let defMultiplier = 1.0; // Caps at 100% if scaling reaches 0
-  if (defScaling > 0) {
+  let defMultiplier = 1.0;
+  if (defScaling > 0)
     defMultiplier =
       (attackerLevel + 20) /
       ((enemyLevel + 20) * defScaling + (attackerLevel + 20));
+
+  let enemyRes = 0.2;
+  if (target.weaknesses && target.weaknesses.includes(element)) {
+    enemyRes = 0.0;
   }
 
-  // --- 4. RES MULTIPLIER ---
-  const isWeak = target.weaknesses && target.weaknesses.includes(element);
-  const baseRes = isWeak ? 0.0 : 0.2; // 0% if weak, 20% if not
-  let resMultiplier = 1 - (baseRes - resPen);
-  resMultiplier = Math.max(0.1, Math.min(2.0, resMultiplier)); // Clamp 10% to 200%
-
-  // --- 5. VULNERABILITY MULTIPLIER ---
+  let finalRes = enemyRes - (attacker.resPen || 0);
+  let resMultiplier = Math.max(0.1, Math.min(2.0, 1.0 - finalRes));
   const vulnMultiplier = 1 + vulnerability;
-
-  // --- 6. MITIGATION MULTIPLIER ---
   const mitMultiplier = 1 - dmgMitigation;
-
-  // --- 7. TOUGHNESS MULTIPLIER ---
   const toughnessMultiplier = target.isBroken ? 1.0 : 0.9;
 
-  // ==========================================
-  // A. NORMAL DAMAGE CALCULATION
-  // ==========================================
-  const baseDamage = activeMultiplier * atk;
   const normalDamage = Math.floor(
-    baseDamage *
+    activeMultiplier *
+      atk *
       critMultiplier *
       boostMultiplier *
       defMultiplier *
@@ -169,13 +161,8 @@ export function calculateDamage(
       toughnessMultiplier,
   );
 
-  // ==========================================
-  // B. BREAK DAMAGE CALCULATION
-  // ==========================================
   let breakDamage = 0;
   if (isBreakHit) {
-    const maxToughnessMultiplier = 0.5 + maxToughness / 40;
-
     let elementMultiplier = 1.0;
     if (["Physical", "Fire"].includes(element)) elementMultiplier = 2.0;
     else if (element === "Wind") elementMultiplier = 1.5;
@@ -183,22 +170,85 @@ export function calculateDamage(
     else if (["Quantum", "Imaginary"].includes(element))
       elementMultiplier = 0.5;
 
-    const lvlMultiplier =
-      LEVEL_MULTIPLIER[attackerLevel] || LEVEL_MULTIPLIER[1];
-
-    const baseBreak =
-      elementMultiplier * lvlMultiplier * maxToughnessMultiplier;
-
-    // Break DMG ignores CRIT, Boosts, and Weaken. Uses base 0.9 Toughness mult on the breaking hit.
+    const baseBreak = getBaseBreakDamage(attackerLevel, maxToughness);
     breakDamage = Math.floor(
-      baseBreak *
+      elementMultiplier *
+        baseBreak *
         defMultiplier *
         resMultiplier *
         vulnMultiplier *
         mitMultiplier *
-        0.9,
+        0.9 *
+        (1 + breakEffect),
     );
   }
 
   return { normalDamage, breakDamage };
+}
+
+// --- FIXED: EXACT HSR DOT FORMULAS ---
+export function calculateBreakDoT(attacker, target, debuff) {
+  const element = attacker.element || "Physical";
+  const baseBreak = getBaseBreakDamage(
+    attacker.level || 1,
+    target.baseToughness || 30,
+  );
+  const isElite = target.isElite || false;
+  const maxHp = target.baseHp || target.hp || 100;
+
+  let dotDamage = 0;
+
+  if (element === "Physical") {
+    // Bleed: MaxHP% capped at 2x BaseBreak
+    const hpPercent = isElite ? 0.07 : 0.16;
+    dotDamage = Math.min(maxHp * hpPercent, 2.0 * baseBreak);
+  } else if (element === "Lightning") {
+    dotDamage = 2.0 * baseBreak;
+  } else if (element === "Fire") {
+    dotDamage = 1.0 * baseBreak;
+  } else if (element === "Wind") {
+    dotDamage = 1.0 * baseBreak * (debuff.stacks || 1);
+  } else if (element === "Ice") {
+    dotDamage = 1.0 * baseBreak;
+  } else if (element === "Quantum") {
+    dotDamage = 0.6 * baseBreak * (debuff.stacks || 1);
+  } else if (element === "Imaginary") {
+    dotDamage = 0;
+  }
+
+  // Calculate snapshot defenses
+  const defScaling = Math.max(
+    0,
+    1 +
+      (target.defBonus || 0) -
+      (target.defReduction || 0) -
+      (attacker.defIgnore || 0),
+  );
+  let defMultiplier = 1.0;
+  if (defScaling > 0)
+    defMultiplier =
+      ((attacker.level || 1) + 20) /
+      (((target.level || 1) + 20) * defScaling + ((attacker.level || 1) + 20));
+
+  let enemyRes = 0.2;
+  if (target.weaknesses && target.weaknesses.includes(element)) {
+    enemyRes = 0.0;
+  }
+
+  // Subtract any Resistance Penetration the attacker might have
+  let finalRes = enemyRes - resPen;
+
+  // The Resistance Multiplier formula is: 100% - finalRES%
+  // (Capped between 0.1 and 2.0 to prevent bugs with extreme buffs)
+  let resMultiplier = Math.max(0.1, Math.min(2.0, 1.0 - finalRes));
+  const vulnMultiplier = 1 + (target.vulnerability || 0);
+  const breakEffectMultiplier = 1 + (attacker.breakEffect || 0);
+
+  return Math.floor(
+    dotDamage *
+      defMultiplier *
+      resMultiplier *
+      vulnMultiplier *
+      breakEffectMultiplier,
+  );
 }

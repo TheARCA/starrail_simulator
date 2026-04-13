@@ -24,6 +24,7 @@ import {
   getWrappedText,
   drawChamferedRect,
 } from "./graphics.js";
+import { analyser, dataArray } from "../systems/sound.js";
 
 // Exported so input.js can reuse them!
 export function isInside(x, y, rect) {
@@ -459,10 +460,20 @@ export function drawUI() {
 
   ctx.fillStyle = "rgba(71, 68, 59, 0.3)";
   const time = performance.now() / 200;
+
+  if (analyser && dataArray) {
+    analyser.getByteFrequencyData(dataArray);
+  }
+
   for (let i = 0; i < 40; i++) {
-    let h =
-      4 +
-      Math.abs(Math.sin(time + i * 0.3) * Math.cos(time * 2.5 + i * 0.1)) * 14;
+    // Start with a static, flat 4px baseline
+    let h = 4;
+
+    if (analyser && dataArray) {
+      let audioSpike = (dataArray[i] / 255) * 55;
+      h += audioSpike;
+    }
+
     ctx.fillRect(UI_PANEL.x + 40 + i * 6, UI_PANEL.y - 12 - h + 8, 3, h);
   }
 
@@ -499,6 +510,8 @@ export function drawUI() {
         drawButton(btnUltimate, ultName, ultActive, false, !canUlt);
     }
   }
+
+  drawTooltip();
 }
 
 export function drawButton(
@@ -603,5 +616,117 @@ export function drawActiveSkillBanner() {
     NIER_LIGHT,
   );
   ctx.letterSpacing = "0px";
+  ctx.restore();
+}
+
+// --- NEW: TOOLTIP RENDERER ---
+function drawTooltip() {
+  if (!mouse.heldAction) return;
+  const holdTime = performance.now() - mouse.holdStart;
+  if (holdTime < 300) return;
+
+  const activeChar = party.find((p) => p.id === state.activeUnitId) || party[0];
+  if (!activeChar) return;
+
+  const logic = activeChar.combatLogic;
+  let moveData;
+
+  if (state.isEnhanced) {
+    if (mouse.heldAction === "ATTACK")
+      moveData = logic.ultimate.modes.blowoutBasic;
+    else if (mouse.heldAction === "SKILL")
+      moveData = logic.ultimate.modes.blowoutSkill;
+  } else {
+    if (mouse.heldAction === "ATTACK") moveData = logic.basic;
+    else if (mouse.heldAction === "SKILL") moveData = logic.skill;
+    else if (mouse.heldAction === "ULTIMATE") moveData = logic.ultimate;
+  }
+
+  if (!moveData || !moveData.description) return;
+
+  // 1. Force description into an array so we can process paragraphs
+  let paragraphs = Array.isArray(moveData.description)
+    ? moveData.description
+    : [moveData.description];
+
+  // 2. Swap out the placeholder tokens for EVERY paragraph
+  paragraphs = paragraphs.map((text) => {
+    text = text.replace(/%element%/g, activeChar.element || "Physical");
+
+    // Standard attacks
+    if (moveData.multiplier)
+      text = text.replace(
+        /%mult%/g,
+        Math.round(moveData.multiplier * 100) + "%",
+      );
+    if (moveData.multiplierAdj)
+      text = text.replace(
+        /%multAdj%/g,
+        Math.round(moveData.multiplierAdj * 100) + "%",
+      );
+
+    // Ultimate sub-mode fetching (so the main ultimate desc can read its sub-attacks)
+    if (logic.ultimate && logic.ultimate.modes) {
+      text = text.replace(
+        /%multBasic%/g,
+        Math.round(logic.ultimate.modes.blowoutBasic.multiplier * 100) + "%",
+      );
+      text = text.replace(
+        /%multSkill%/g,
+        Math.round(logic.ultimate.modes.blowoutSkill.multiplier * 100) + "%",
+      );
+      text = text.replace(
+        /%multSkillAdj%/g,
+        Math.round(logic.ultimate.modes.blowoutSkill.multiplierAdj * 100) + "%",
+      );
+    }
+    return text;
+  });
+
+  let targetBtn = btnAttack;
+  if (mouse.heldAction === "SKILL") targetBtn = btnSkill;
+  if (mouse.heldAction === "ULTIMATE") targetBtn = btnUltimate;
+
+  const boxW = 540;
+  const boxX = targetBtn.x + targetBtn.w / 2 - boxW / 2;
+
+  ctx.save();
+  ctx.font = "600 18px 'NewRodin', sans-serif";
+
+  // 3. Measure all paragraphs and stitch them together with blank lines
+  let allLines = [];
+  paragraphs.forEach((p) => {
+    const { lines } = getWrappedText(ctx, p, boxW - 40, 18, 500);
+    allLines.push(...lines);
+    allLines.push(""); // Add an empty line for spacing between paragraphs!
+  });
+  allLines.pop(); // Remove the very last empty line
+
+  const lineHeight = 26;
+  const paddingY = 40;
+  const boxH = paddingY + allLines.length * lineHeight;
+  const boxY = targetBtn.y - boxH - 20;
+
+  const alpha = Math.min(1, (holdTime - 300) / 150);
+  ctx.globalAlpha = alpha;
+
+  applyHardShadow();
+  ctx.fillStyle = NIER_LIGHT;
+  drawChamferedRect(boxX, boxY, boxW, boxH, 15);
+  ctx.fill();
+  clearShadow();
+  strokeWithCA(NIER_DARK, 2);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  allLines.forEach((line, i) => {
+    // Skip drawing if it's our artificial paragraph break
+    if (line !== "") {
+      const startY = boxY + 20 + lineHeight / 2;
+      drawTextWithCA(line, boxX + boxW / 2, startY + i * lineHeight, NIER_DARK);
+    }
+  });
+
   ctx.restore();
 }

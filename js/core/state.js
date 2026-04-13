@@ -31,19 +31,20 @@ export const state = {
   },
 };
 
-export const mouse = { x: 0, y: 0 };
-
+export const mouse = {
+  x: 0,
+  y: 0,
+  isDown: false,
+  heldAction: null,
+  holdStart: 0,
+};
 export const GAME_WIDTH = 1920;
 export const GAME_HEIGHT = 1080;
 export const CARD_SIZE = 180;
-
-// --- HORIZONTAL BATTLE COMMAND INTERFACE REDESIGN ---
-export const UI_PANEL = { x: 420, y: 880, w: 1080, h: 120 }; // Pushed down from 840
-
+export const UI_PANEL = { x: 420, y: 880, w: 1080, h: 120 };
 export const btnAttack = { x: 460, y: 910, w: 300, h: 60 };
 export const btnSkill = { x: 810, y: 910, w: 300, h: 60 };
 export const btnUltimate = { x: 1160, y: 910, w: 300, h: 60 };
-
 export const btnStartBattle = {
   x: 760,
   y: 900,

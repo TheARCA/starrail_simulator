@@ -31,8 +31,38 @@ import {
   drawTotalDamage,
 } from "./ui.js";
 
-const spritePlaceholder = new Image();
-spritePlaceholder.src = `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`;
+const imageCache = {};
+const PLACEHOLDER_SRC = `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`;
+
+function getEntityImage(entity, isEnemy) {
+  if (imageCache[entity.id]) return imageCache[entity.id];
+
+  const img = new Image();
+  const folder = isEnemy ? "enemies" : "characters";
+
+  // The list of formats we want to try, in order!
+  const extensions = ["png", "webp", "jpg", "jpeg"];
+  let currentExtIndex = 0;
+
+  // Attempt to load the first format
+  img.src = `assets/img/${folder}/${entity.id}.${extensions[currentExtIndex]}`;
+
+  // If it fails, try the next one on the list
+  img.onerror = () => {
+    currentExtIndex++;
+
+    if (currentExtIndex < extensions.length) {
+      // Still have formats to try!
+      img.src = `assets/img/${folder}/${entity.id}.${extensions[currentExtIndex]}`;
+    } else if (img.src !== PLACEHOLDER_SRC) {
+      // Exhausted all formats, time to use the gray DATA box
+      img.src = PLACEHOLDER_SRC;
+    }
+  };
+
+  imageCache[entity.id] = img;
+  return img;
+}
 
 export function initVisuals() {
   initGraphics();
@@ -40,10 +70,15 @@ export function initVisuals() {
 }
 
 function calculateXPosition(index, totalCards, cardSize, screenWidth) {
-  const gap = 30;
+  // --- FIXED: Increased gap from 30 to 80 to fit the debuff data streams! ---
+  const gap = 80;
+
   const totalGroupWidth = totalCards * cardSize + (totalCards - 1) * gap;
   let startX = (screenWidth - totalGroupWidth) / 2;
+
+  // Keep the left-side constraint so it doesn't overlap the Action Bar
   startX = Math.max(260, startX);
+
   return startX + index * (cardSize + gap);
 }
 
@@ -76,6 +111,7 @@ function drawBackground() {
 }
 
 function drawCard(entity, base_x, base_y, isEnemy = false) {
+  // --- PHYSICS & TWEENING (Unchanged) ---
   if (entity.targetOffsetX === undefined) entity.targetOffsetX = 0;
   if (entity.targetOffsetY === undefined) entity.targetOffsetY = 0;
   if (entity.targetScale === undefined) entity.targetScale = 1.0;
@@ -115,19 +151,26 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   const floatY = Math.sin(time / 400 + entity.animX) * 6;
   const x = entity.animX + entity.offsetX;
   const y = entity.animY + entity.offsetY + (entity.hp > 0 ? floatY : 0);
-  const cardHeight = CARD_SIZE + 100;
-  const centerX = x + CARD_SIZE / 2;
+
+  // --- REDESIGN: Sleeker, tighter card height ---
+  const cardWidth = CARD_SIZE;
+  const cardHeight = CARD_SIZE + 40;
+  const centerX = x + cardWidth / 2;
   const centerY = y + cardHeight / 2;
 
+  // --- INTERACTION LOGIC ---
   const isHovered =
     mouse.x > x &&
-    mouse.x < x + CARD_SIZE &&
+    mouse.x < x + cardWidth &&
     mouse.y > y &&
     mouse.y < y + cardHeight;
-  let isTargeted = isEnemy && state.selectedTargetId === entity.id;
+  let isTargeted =
+    isEnemy &&
+    state.selectedTargetId === entity.id &&
+    state.current === STATES.PLAYER_TURN &&
+    !state.isAnimating;
   let isAdjacent = false;
 
-  // Render outline logic relative to the ACTIVE character's queued attack
   if (
     isEnemy &&
     state.pendingAction &&
@@ -138,19 +181,15 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
       party.find((p) => p.id === state.activeUnitId) || party[0];
     if (activeChar) {
       const logic = activeChar.combatLogic;
-      let moveData;
-      if (state.isEnhanced)
-        moveData =
-          state.pendingAction === "ATTACK"
-            ? logic.ultimate.modes.blowoutBasic
-            : logic.ultimate.modes.blowoutSkill;
-      else
-        moveData =
-          state.pendingAction === "ATTACK"
-            ? logic.basic
-            : state.pendingAction === "SKILL"
-              ? logic.skill
-              : logic.ultimate;
+      let moveData = state.isEnhanced
+        ? state.pendingAction === "ATTACK"
+          ? logic.ultimate.modes.blowoutBasic
+          : logic.ultimate.modes.blowoutSkill
+        : state.pendingAction === "ATTACK"
+          ? logic.basic
+          : state.pendingAction === "SKILL"
+            ? logic.skill
+            : logic.ultimate;
 
       if (moveData && moveData.tag === "Blast") {
         const aliveEnemies = enemies.filter(
@@ -172,6 +211,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     !isAdjacent &&
     state.pendingAction;
 
+  // --- RENDER TRANSFORM ---
   ctx.save();
   if (isDimmed) ctx.globalAlpha = 0.3;
   if (entity.hp <= 0) ctx.globalAlpha = Math.max(0, entity.scale);
@@ -181,12 +221,14 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   ctx.rotate(entity.rotation);
   ctx.translate(-centerX, -centerY);
 
+  // --- 1. BASE CARD BACKGROUND ---
   applyHardShadow();
   ctx.fillStyle = NIER_LIGHT;
-  drawChamferedRect(x, y, CARD_SIZE, cardHeight, 20);
+  drawChamferedRect(x, y, cardWidth, cardHeight, 12);
   ctx.fill();
   clearShadow();
 
+  // --- 2. TARGET CHEVRONS ---
   if (
     (isHovered || isTargeted || isAdjacent) &&
     entity.hp > 0 &&
@@ -201,7 +243,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     let thickness = isTargeted ? 4 : 2;
     let alpha = isTargeted ? 1.0 : isAdjacent ? 0.6 : 0.3;
 
-    ctx.translate(x + CARD_SIZE / 2, chevronY);
+    ctx.translate(x + cardWidth / 2, chevronY);
     ctx.beginPath();
     ctx.moveTo(-chevronSize, -chevronSize);
     ctx.lineTo(0, 0);
@@ -217,184 +259,306 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     ctx.restore();
   }
 
-  drawChamferedRect(x, y, CARD_SIZE, cardHeight, 20);
-  let cardStrokeColor = "rgba(71, 68, 59, 0.3)";
-  let cardStrokeWidth = 1;
-
-  if (isTargeted) {
-    cardStrokeColor = NIER_DARK;
-    cardStrokeWidth = 3;
-  } else if (isAdjacent) {
-    cardStrokeColor = "rgba(71, 68, 59, 0.6)";
-    cardStrokeWidth = 2;
-  } else if (isHovered) {
-    cardStrokeColor = "rgba(71, 68, 59, 0.5)";
-    cardStrokeWidth = 2;
-  }
+  // --- 3. BORDER STROKE ---
+  let cardStrokeColor = isTargeted
+    ? NIER_DARK
+    : isAdjacent
+      ? "rgba(71, 68, 59, 0.6)"
+      : isHovered
+        ? "rgba(71, 68, 59, 0.5)"
+        : "rgba(71, 68, 59, 0.3)";
+  let cardStrokeWidth = isTargeted ? 3 : isAdjacent || isHovered ? 2 : 1;
   strokeWithCA(cardStrokeColor, cardStrokeWidth);
 
-  if (spritePlaceholder.complete && spritePlaceholder.naturalHeight !== 0) {
+  // --- 4. PORTRAIT ---
+  const portraitImg = getEntityImage(entity, isEnemy);
+
+  if (portraitImg.complete && portraitImg.naturalHeight !== 0) {
     ctx.save();
-    drawChamferedRect(x + 10, y + 10, CARD_SIZE - 20, CARD_SIZE - 20, 15);
+
+    const px = x + 4;
+    const py = y + 4;
+    const pw = cardWidth - 8;
+    const ph = cardWidth - 8;
+    const cut = 8;
+
+    ctx.beginPath();
+    ctx.moveTo(px + cut, py);
+    ctx.lineTo(px + pw, py);
+    ctx.lineTo(px + pw, py + ph);
+    ctx.lineTo(px, py + ph);
+    ctx.lineTo(px, py + cut);
+    ctx.closePath();
     ctx.clip();
-    ctx.drawImage(
-      spritePlaceholder,
-      x + 10,
-      y + 10,
-      CARD_SIZE - 20,
-      CARD_SIZE - 20,
-    );
+    ctx.globalAlpha = 0.95;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(portraitImg, px, py, pw, ph);
     ctx.restore();
   }
 
-  // --- SMART MULTILINE ANCHORING ---
-  ctx.textAlign = "center";
+  // --- 5. ENEMY WEAKNESSES (Docked Top-Right) ---
+  if (isEnemy && entity.weaknesses && entity.weaknesses.length > 0) {
+    const wSize = 16;
 
-  // Create a safe center anchor for the text (Higher for enemies to make room for icons)
-  let nameY = isEnemy ? y + CARD_SIZE + 18 : y + CARD_SIZE + 28;
-  const { lines, fontSize } = getWrappedText(
-    ctx,
-    entity.name.toUpperCase(),
-    CARD_SIZE - 20,
-    24,
-    600,
-  );
+    // Check if we are currently previewing an attack
+    const isPreviewing =
+      state.current === STATES.PLAYER_TURN &&
+      !state.isAnimating &&
+      state.pendingAction;
+    const activeChar =
+      party.find((p) => p.id === state.activeUnitId) || party[0];
 
-  if (lines.length === 2) {
-    // If it wraps, push line 1 UP and line 2 DOWN from the center anchor
-    drawTextWithCA(
-      lines[0],
-      x + CARD_SIZE / 2,
-      nameY - fontSize / 2,
-      NIER_DARK,
-    );
-    drawTextWithCA(
-      lines[1],
-      x + CARD_SIZE / 2,
-      nameY + fontSize / 2,
-      NIER_DARK,
-    );
-  } else {
-    // Single line sits right perfectly on the center anchor
-    drawTextWithCA(lines[0], x + CARD_SIZE / 2, nameY, NIER_DARK);
+    entity.weaknesses.forEach((w, i) => {
+      const wx = x + cardWidth - 6 - wSize;
+      const wy = y + 8 + i * (wSize + 4);
+
+      // Determine if this specific weakness matches the active character during a preview
+      let isMatching = false;
+      if (isPreviewing && activeChar && activeChar.element === w) {
+        // Only pulse if the enemy is in the line of fire (targeted or adjacent to the blast)
+        if (isTargeted || isAdjacent) {
+          isMatching = true;
+        }
+      }
+
+      if (isMatching) {
+        // --- JUICE: Matching Weakness Pulse ---
+        const pulse = 0.5 + Math.abs(Math.sin(performance.now() / 200)) * 0.5;
+        ctx.fillStyle = `rgba(215, 207, 184, ${pulse})`; // Light flashing background
+        drawChamferedRect(wx, wy, wSize, wSize, 3);
+        ctx.fill();
+        strokeWithCA("rgba(71, 68, 59, 0.8)", 1); // Dark border
+
+        ctx.font = "800 10px 'NewRodin', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        drawTextWithCA(
+          w.charAt(0).toUpperCase(),
+          wx + wSize / 2,
+          wy + wSize / 2 + 1,
+          NIER_DARK,
+        );
+      } else {
+        // Standard Dark Background for non-matching or idle weaknesses
+        ctx.fillStyle = "rgba(71, 68, 59, 0.9)";
+        drawChamferedRect(wx, wy, wSize, wSize, 3);
+        ctx.fill();
+
+        ctx.font = "800 10px 'NewRodin', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        drawTextWithCA(
+          w.charAt(0).toUpperCase(),
+          wx + wSize / 2,
+          wy + wSize / 2 + 1,
+          NIER_LIGHT,
+        );
+      }
+    });
   }
 
-  const barX = x + 20;
-  const barW = CARD_SIZE - 40;
-  let hpBarY = y + CARD_SIZE + 72; // Standardized HP bar Y for both
+  // --- 6. NAME BANNER (Solid Band) ---
+  const bannerY = y + CARD_SIZE - 24;
+  ctx.fillStyle = NIER_DARK;
+  ctx.fillRect(x, bannerY, cardWidth, 22);
+  ctx.font = "700 11px 'NewRodin', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
 
+  let shortName = entity.name.toUpperCase();
+  if (ctx.measureText(shortName).width > cardWidth - 10)
+    shortName = shortName.substring(0, 14) + ".";
+  drawTextWithCA(shortName, x + cardWidth / 2, bannerY + 11, NIER_LIGHT);
+
+  // --- 7. COMPACT STAT BARS ---
   if (entity.baseHp === undefined) entity.baseHp = entity.hp;
   if (entity.baseToughness === undefined)
     entity.baseToughness = entity.toughness;
 
+  const barX = x + 10;
+  const barW = cardWidth - 20;
+
   if (isEnemy) {
-    if (entity.weaknesses && entity.weaknesses.length > 0) {
-      const iconSize = 18;
-      const gap = 6;
-      const totalWidth =
-        entity.weaknesses.length * iconSize +
-        (entity.weaknesses.length - 1) * gap;
-      let startX = x + CARD_SIZE / 2 - totalWidth / 2;
-      let iconY = y + CARD_SIZE + 36;
+    // Enemy Toughness Bar
+    let toughY = bannerY + 28;
+    let toughPct = Math.max(
+      0,
+      Math.min(1, entity.toughness / entity.baseToughness),
+    );
 
-      entity.weaknesses.forEach((weakness, idx) => {
-        const ix = startX + idx * (iconSize + gap);
-        ctx.fillStyle = "rgba(71, 68, 59, 0.8)";
-        drawChamferedRect(ix, iconY, iconSize, iconSize, 4);
-        ctx.fill();
-        ctx.font = "800 12px 'NewRodin', sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        drawTextWithCA(
-          weakness.charAt(0).toUpperCase(),
-          ix + iconSize / 2,
-          iconY + iconSize / 2 + 1,
-          NIER_LIGHT,
-        );
-      });
-      ctx.textBaseline = "alphabetic";
-    }
+    // Draw Background & Thicker Border
+    ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
+    ctx.fillRect(barX, toughY, barW, 4);
+    ctx.strokeStyle = "rgba(71, 68, 59, 0.6)"; // Darkened for better visibility
+    ctx.lineWidth = 2; // Increased from 1 to 2
+    ctx.strokeRect(barX, toughY, barW, 4);
 
-    if (entity.baseToughness !== undefined && entity.baseToughness > 0) {
-      const toughY = hpBarY - 8;
-      const toughPercent = Math.max(
-        0,
-        Math.min(1, entity.toughness / entity.baseToughness),
-      );
-      ctx.fillStyle = "rgba(71, 68, 59, 0.15)";
-      ctx.fillRect(barX, toughY, barW, 4);
-      if (!entity.isBroken) {
-        ctx.fillStyle = "rgba(71, 68, 59, 0.5)";
-        ctx.fillRect(barX, toughY, barW * toughPercent, 4);
-      } else {
-        ctx.font = "800 10px 'NewRodin', sans-serif";
-        ctx.textAlign = "center";
+    if (!entity.isBroken) {
+      // --- WEAKNESS BREAK PREVIEW ---
+      let previewDamage = 0;
 
-        // PURGED: Replaced #D32F2F with the Nier Dark #47443b
-        drawTextWithCA(
-          "WEAKNESS BROKEN",
-          x + CARD_SIZE / 2,
-          toughY + 5,
-          "#47443b",
-        );
+      // Check if player is targeting and not currently attacking
+      if (
+        state.current === STATES.PLAYER_TURN &&
+        !state.isAnimating &&
+        state.pendingAction
+      ) {
+        const activeChar =
+          party.find((p) => p.id === state.activeUnitId) || party[0];
+
+        // Ensure the attacker's element matches the enemy's weakness!
+        if (
+          activeChar &&
+          entity.weaknesses &&
+          entity.weaknesses.includes(activeChar.element)
+        ) {
+          const logic = activeChar.combatLogic;
+          let moveData;
+
+          if (state.isEnhanced) {
+            moveData =
+              state.pendingAction === "ATTACK"
+                ? logic.ultimate.modes.blowoutBasic
+                : logic.ultimate.modes.blowoutSkill;
+          } else {
+            moveData =
+              state.pendingAction === "ATTACK"
+                ? logic.basic
+                : state.pendingAction === "SKILL"
+                  ? logic.skill
+                  : logic.ultimate;
+          }
+
+          if (moveData) {
+            if (isTargeted) previewDamage = moveData.toughnessDamage || 10;
+            else if (isAdjacent)
+              previewDamage = moveData.toughnessDamageAdj || 10;
+          }
+        }
       }
-    }
-    if (entity.debuffs && entity.debuffs.length > 0) {
-      const tagY = y + CARD_SIZE + 18;
 
-      entity.debuffs.forEach((d, index) => {
-        // Draw a faint technical background
-        ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
-        ctx.fillRect(x + 5, tagY + index * 14, CARD_SIZE - 10, 12);
-
-        // Draw the Debuff Name and remaining Duration
-        ctx.font = "600 8px 'NewRodin', sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        drawTextWithCA(
-          `${d.name} (${d.duration})`,
-          x + CARD_SIZE / 2,
-          tagY + 6 + index * 14,
-          "#47443b",
+      if (previewDamage > 0) {
+        // Calculate ONLY the depleted portion
+        const remainingToughness = Math.max(
+          0,
+          entity.toughness - previewDamage,
         );
+        const remainPercent = remainingToughness / entity.baseToughness;
+        const depleteW = barW * (toughPct - remainPercent);
+
+        // Solid bar for what will remain
+        ctx.fillStyle = "rgba(71, 68, 59, 0.6)";
+        ctx.fillRect(barX, toughY, barW * remainPercent, 4);
+
+        // Flashing bar ONLY for the chunk being destroyed
+        // Slower pulse (/300) and higher minimum opacity (0.55 to 0.95) so it doesn't vanish
+        const pulse = 0.55 + Math.abs(Math.sin(performance.now() / 300)) * 0.4;
+
+        // Slightly brighter base color to make it pop more
+        ctx.fillStyle = `rgba(235, 227, 204, ${pulse})`;
+        ctx.fillRect(barX + barW * remainPercent, toughY, depleteW, 4);
+      } else {
+        // Normal drawing if there is no preview active
+        ctx.fillStyle = "rgba(71, 68, 59, 0.6)";
+        ctx.fillRect(barX, toughY, barW * toughPct, 4);
+      }
+    } else {
+      ctx.font = "800 8px 'NewRodin', sans-serif";
+      ctx.textAlign = "center";
+      drawTextWithCA("BROKEN", x + cardWidth / 2, toughY + 3, "#47443b");
+    }
+
+    // Enemy HP Bar
+    let hpY = toughY + 10;
+    let hpPct = Math.max(0, Math.min(1, entity.hp / entity.baseHp));
+
+    // Draw Background & Thicker Border
+    ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
+    ctx.fillRect(barX, hpY, barW, 6);
+    ctx.strokeStyle = "rgba(71, 68, 59, 0.6)"; // Darkened
+    ctx.lineWidth = 2; // Increased to 2
+    ctx.strokeRect(barX, hpY, barW, 6);
+
+    // Fill Current HP
+    ctx.fillStyle = NIER_DARK;
+    ctx.fillRect(barX, hpY, barW * hpPct, 6);
+
+    // --- 8. SIDE-DOCKED DEBUFFS ---
+    if (entity.debuffs && entity.debuffs.length > 0) {
+      entity.debuffs.forEach((d, i) => {
+        const dy = y + 20 + i * 18;
+        const dx = x + cardWidth + 4;
+
+        const label = `${d.name} ${d.duration}`;
+        ctx.font = "800 10px 'NewRodin', sans-serif";
+        const textW = ctx.measureText(label).width;
+
+        ctx.fillStyle = "rgba(215, 207, 184, 0.95)";
+        ctx.fillRect(dx, dy, textW + 12, 14);
+
+        ctx.fillStyle = NIER_DARK;
+        ctx.fillRect(dx, dy, 2, 14);
+
+        ctx.fillStyle = NIER_DARK;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, dx + 6, dy + 7);
       });
     }
   } else {
-    ctx.font = "400 16px 'NewRodin', sans-serif";
+    // Player HP Bar
+    let hpY = bannerY + 28;
+    let hpPct = Math.max(0, Math.min(1, entity.hp / entity.baseHp));
+
+    // Draw Background & Thicker Border
+    ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
+    ctx.fillRect(barX, hpY, barW, 8);
+    ctx.strokeStyle = "rgba(71, 68, 59, 0.6)"; // Darkened
+    ctx.lineWidth = 2; // Increased to 2
+    ctx.strokeRect(barX, hpY, barW, 8);
+
+    // Fill Current HP
+    ctx.fillStyle = NIER_DARK;
+    ctx.fillRect(barX, hpY, barW * hpPct, 8);
+
+    // Player Energy Bar
+    let enY = hpY + 12;
+    let enPct = Math.max(
+      0,
+      Math.min(1, entity.displayEnergy / (entity.maxEnergy || 120)),
+    );
+
+    // Draw Background & Thicker Border
+    ctx.fillStyle = "rgba(71, 68, 59, 0.05)";
+    ctx.fillRect(barX, enY, barW, 4);
+    ctx.strokeStyle = "rgba(71, 68, 59, 0.4)"; // Darkened
+    ctx.lineWidth = 2; // Increased to 2
+    ctx.strokeRect(barX, enY, barW, 4);
+
+    // Fill Current Energy
+    ctx.fillStyle = "rgba(71, 68, 59, 0.5)";
+    ctx.fillRect(barX, enY, barW * enPct, 4);
+
+    // Sharp HP text inside the bar bounds
+    ctx.font = "700 9px 'NewRodin', sans-serif";
     ctx.textAlign = "center";
-    const hpColor =
-      entity.hp <= 0 ? "rgba(71, 68, 59, 0.4)" : "rgba(71, 68, 59, 0.8)";
+    ctx.textBaseline = "middle";
+    const hpColor = entity.hp <= 0 ? "rgba(71, 68, 59, 0.4)" : NIER_LIGHT;
     drawTextWithCA(
-      `${Math.ceil(entity.hp)} / ${entity.baseHp} HP`,
-      x + CARD_SIZE / 2,
-      y + CARD_SIZE + 56,
+      `${Math.ceil(entity.hp)} / ${entity.baseHp}`,
+      x + cardWidth / 2,
+      hpY + 5,
       hpColor,
     );
   }
 
-  const hpPercent = Math.max(0, Math.min(1, entity.hp / entity.baseHp));
-  ctx.fillStyle = "rgba(71, 68, 59, 0.2)";
-  ctx.fillRect(barX, hpBarY, barW, 4);
-  ctx.fillStyle = NIER_DARK;
-  ctx.fillRect(barX, hpBarY, barW * hpPercent, 4);
-
-  if (!isEnemy) {
-    const enPercent = Math.max(
-      0,
-      Math.min(1, entity.displayEnergy / (entity.maxEnergy || 120)),
-    );
-    const enBarY = hpBarY + 8;
-    ctx.fillStyle = "rgba(71, 68, 59, 0.15)";
-    ctx.fillRect(barX, enBarY, barW, 4);
-    ctx.fillStyle = "rgba(71, 68, 59, 0.5)";
-    ctx.fillRect(barX, enBarY, barW * enPercent, 4);
-  }
-
   if (entity.flash > 0) {
     ctx.fillStyle = `rgba(255, 255, 255, ${entity.flash})`;
-    drawChamferedRect(x, y, CARD_SIZE, cardHeight, 20);
+    drawChamferedRect(x, y, cardWidth, cardHeight, 15);
     ctx.fill();
   }
+
   ctx.restore();
 }
 
@@ -514,11 +678,18 @@ function render() {
         );
         ctx.lineTo(
           targetEnemy.renderX + CARD_SIZE / 2 + (targetEnemy.offsetX || 0),
-          targetEnemy.renderY + CARD_SIZE + 100,
+          targetEnemy.renderY + CARD_SIZE + 40,
         );
-        ctx.setLineDash([10, 15]);
+
+        // --- JUICE: High-Contrast Main Target Line ---
+        ctx.setLineDash([15, 12]); // Tighter, more aggressive dashes
         ctx.lineDashOffset = -(performance.now() / 20);
-        strokeWithCA("rgba(71, 68, 59, 0.5)", 2);
+
+        // 1. Draw a thick dark outer stroke
+        strokeWithCA("rgba(71, 68, 59, 0.85)", 5);
+        // 2. Draw a bright inner core stroke
+        strokeWithCA("rgba(215, 207, 184, 0.95)", 2);
+
         ctx.restore();
 
         const logic = activeChar.combatLogic;
@@ -540,6 +711,7 @@ function render() {
           if (tIdx > 0) adjacents.push(visibleEnemies[tIdx - 1]);
           if (tIdx < visibleEnemies.length - 1)
             adjacents.push(visibleEnemies[tIdx + 1]);
+
           adjacents.forEach((adj) => {
             ctx.save();
             ctx.beginPath();
@@ -549,11 +721,14 @@ function render() {
             );
             ctx.lineTo(
               adj.renderX + CARD_SIZE / 2 + (adj.offsetX || 0),
-              adj.renderY + CARD_SIZE + 100,
+              adj.renderY + CARD_SIZE + 40,
             );
-            ctx.setLineDash([5, 20]);
+
+            // --- JUICE: Stronger Adjacent Target Lines ---
+            ctx.setLineDash([8, 16]);
             ctx.lineDashOffset = -(performance.now() / 30);
-            strokeWithCA("rgba(71, 68, 59, 0.3)", 1);
+            strokeWithCA("rgba(71, 68, 59, 0.6)", 3); // Thicker and darker
+
             ctx.restore();
           });
         }

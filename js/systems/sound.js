@@ -2,11 +2,21 @@
 
 let audioCtx = null;
 
+// --- NEW: Export the analyser so the UI can read the sound waves ---
+export let analyser = null;
+export let dataArray = null;
+
 // Browsers block audio until the user interacts with the page.
 // We will call this on the very first click/keypress.
 export function initAudio() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Create Analyser Node for the UI Waveform
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 128; // Creates 64 frequency bins (perfect for our 40 UI bars)
+    analyser.connect(audioCtx.destination);
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
   }
 }
 
@@ -17,7 +27,8 @@ function playTone(type, startFreq, endFreq, duration, vol = 0.1) {
 
   osc.type = type;
   osc.connect(gain);
-  gain.connect(audioCtx.destination);
+  // --- NEW: Connect to the analyser instead of directly to the destination ---
+  gain.connect(analyser);
 
   const now = audioCtx.currentTime;
   osc.frequency.setValueAtTime(startFreq, now);
@@ -36,38 +47,33 @@ function playTone(type, startFreq, endFreq, duration, vol = 0.1) {
 // --- THE SOUND LIBRARY ---
 
 export function playUIClick() {
-  // High, short sci-fi beep
   playTone("sine", 800, 1200, 0.05, 0.05);
 }
 
 export function playUIHover() {
-  // Very soft, low click for mousing over things
   playTone("triangle", 400, 400, 0.02, 0.02);
 }
 
 export function playAttackDash() {
-  // A quick, kinetic swoosh
   playTone("triangle", 300, 50, 0.15, 0.1);
 }
 
 export function playHeavyHit() {
-  // A deep, bass-heavy crunch
   playTone("square", 150, 40, 0.2, 0.15);
 }
 
 export function playBreak() {
-  // A high, shattering electronic screech
   playTone("sawtooth", 1200, 200, 0.4, 0.2);
 }
 
 export function playUltimateCharge() {
-  // A rising, cinematic energy build-up
   if (!audioCtx) return;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = "sawtooth";
   osc.connect(gain);
-  gain.connect(audioCtx.destination);
+
+  gain.connect(analyser);
 
   const now = audioCtx.currentTime;
   osc.frequency.setValueAtTime(100, now);

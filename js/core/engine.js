@@ -60,6 +60,7 @@ export function initEngine() {
     },
     (actionName, attackerData) => {
       executeCombatSequence(actionName, attackerData).then(() => {
+        state.current = null;
         processGameFlow();
       });
     },

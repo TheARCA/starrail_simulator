@@ -2,7 +2,7 @@ export const VoidrangerReaver = {
   id: "e_voidranger_reaver",
   name: "Voidranger: Reaver",
   level: 1,
-  element: "Imaginary", // Drives the RES math
+  element: "Imaginary",
 
   hp: 112,
   atk: 12,
