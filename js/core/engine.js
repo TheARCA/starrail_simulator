@@ -11,7 +11,6 @@ import {
 
 // --- THE CENTRAL GAME LOOP COORDINATOR ---
 function processGameFlow() {
-  // ... (Your existing processGameFlow code remains exactly the same) ...
   const status = checkWinLossState();
   if (status !== "CONTINUE") return;
 
@@ -94,26 +93,31 @@ export function initEngine() {
       document.body.appendChild(loader);
 
       // 2. Create a forced minimum delay (2000 milliseconds = 2 seconds)
-      const minimumLoadingTime = new Promise((resolve) =>
-        setTimeout(resolve, 2000),
-      );
+      const minimumLoadingTime = new Promise((resolve) => setTimeout(resolve, 2000));
 
       // 3. Wait for BOTH the assets to load AND the 2 seconds to pass
       Promise.all([
         preloadBattleAssets(party, enemies),
-        minimumLoadingTime,
+        minimumLoadingTime
       ]).then(() => {
-        // 4. Fade out the screen
-        loader.style.opacity = "0";
-        setTimeout(() => {
-          loader.remove(); // Cleanup the DOM
+        
+        // 4. MOVED: Initialize state and engine BEHIND the loading screen
+        party.forEach((p) => (p.av = 10000 / (p.spd || 100)));
+        enemies.forEach((e) => (e.av = 10000 / (e.spd || 100)));
+        state.selectedTargetId = enemies[0].id;
+        
+        // This triggers the state change to combat, drawing the arena in the background
+        processGameFlow();
+        
+        // 5. Wait for the canvas to draw the first frame of the arena, then fade out
+        requestAnimationFrame(() => {
+          loader.style.opacity = "0";
+          
+          setTimeout(() => {
+            loader.remove(); // Cleanup the DOM
+          }, 300); // 300ms matches the CSS transition time
+        });
 
-          // 5. Initialize action values and start the engine
-          party.forEach((p) => (p.av = 10000 / (p.spd || 100)));
-          enemies.forEach((e) => (e.av = 10000 / (e.spd || 100)));
-          state.selectedTargetId = enemies[0].id;
-          processGameFlow();
-        }, 300); // 300ms matches the CSS transition time
       });
     },
     (actionName, attackerData) => {
