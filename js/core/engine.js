@@ -9,29 +9,43 @@ import {
   processTurnStart,
 } from "../systems/combat.js";
 
-// --- THE CENTRAL GAME LOOP COORDINATOR ---
+// Main loop that controls battle flow and turn progression
 function processGameFlow() {
   const status = checkWinLossState();
+
+  // Stop processing if game already ended
   if (status !== "CONTINUE") return;
 
+  // Only proceed if no animation is currently playing
   if (!state.isAnimating) {
+    // Only advance timeline if it's not player's turn
     if (state.current !== STATES.PLAYER_TURN) {
       const nextUnit = advanceTimeline();
 
+      // If a unit is ready to act
       if (nextUnit) {
         state.isAnimating = true;
 
+        // Handle effects that occur at the start of a unit's turn
         processTurnStart(nextUnit).then((canAct) => {
           state.isAnimating = false;
 
+          // If unit cannot act (stunned, dead, etc.)
           if (!canAct) {
-            if (nextUnit.hp > 0 && nextUnit.av <= 0)
+            // Reset action value if still alive and ready
+            if (nextUnit.hp > 0 && nextUnit.av <= 0) {
               nextUnit.av = 10000 / (nextUnit.spd || 100);
+            }
+
+            // Clear turn and continue flow
             state.current = null;
             processGameFlow();
           } else {
+            // If it's enemy turn, perform enemy action
             if (state.current === STATES.ENEMY_TURN) {
               state.isAnimating = true;
+
+              // Small delay before enemy acts (for pacing)
               setTimeout(() => {
                 enemyAction(nextUnit).then(() => {
                   processGameFlow();
@@ -45,83 +59,99 @@ function processGameFlow() {
   }
 }
 
-// --- NEW: Dynamic Asset Loader for Battles ---
+// Loads all images required for the current battle before starting
 function preloadBattleAssets(partyList, enemyList) {
   const assetsToLoad = [];
-  const CARD_SIZE = 64; // Adjust to match your constants
+  const CARD_SIZE = 64;
 
-  // Extract image paths from the current party and enemy database objects
-  // Change '.img' to match your actual database property names if different
+  // Collect all party image paths
   partyList.forEach((p) => {
     if (p.img) assetsToLoad.push(p.img);
   });
+
+  // Collect all enemy image paths
   enemyList.forEach((e) => {
     if (e.img) assetsToLoad.push(e.img);
   });
 
-  // Guarantee the placeholder data cards are re-cached
+  // Add fallback placeholder image to ensure it's cached
   assetsToLoad.push(
     `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`,
   );
 
+  // Load all assets asynchronously
   return Promise.all(
     assetsToLoad.map((src) => {
       return new Promise((resolve) => {
         const img = new Image();
+
+        // Enable CORS for external images
         if (src.startsWith("http")) {
           img.crossOrigin = "anonymous";
         }
+
         img.src = src;
+
+        // Resolve when image loads successfully
         img.onload = () => resolve(img);
+
+        // Resolve even if image fails (prevents soft-lock)
         img.onerror = () => {
           console.warn(`Battle asset failed to load: ${src}`);
-          resolve(null); // Resolve anyway so the battle doesn't soft-lock
+          resolve(null);
         };
       });
     }),
   );
 }
 
+// Initializes the engine and binds input handlers
 export function initEngine() {
   initInputs(
-    // Triggered when "Start Battle" is clicked/invoked
+    // Called when "Start Battle" is triggered
     () => {
-      // 1. Generate and attach the loading screen dynamically
+      // Create loading screen overlay
       const loader = document.createElement("div");
       loader.id = "battleLoadingScreen";
       loader.innerHTML = `<div class="loader-text">ENTERING COMBAT...</div>`;
       document.body.appendChild(loader);
 
-      // 2. Create a forced minimum delay (2000 milliseconds = 2 seconds)
-      const minimumLoadingTime = new Promise((resolve) => setTimeout(resolve, 2000));
+      // Ensure loading screen stays visible for at least 2 seconds
+      const minimumLoadingTime = new Promise((resolve) =>
+        setTimeout(resolve, 2000),
+      );
 
-      // 3. Wait for BOTH the assets to load AND the 2 seconds to pass
+      // Wait for assets AND minimum loading time
       Promise.all([
         preloadBattleAssets(party, enemies),
-        minimumLoadingTime
+        minimumLoadingTime,
       ]).then(() => {
-        
-        // 4. MOVED: Initialize state and engine BEHIND the loading screen
+        // Initialize action values for all units
         party.forEach((p) => (p.av = 10000 / (p.spd || 100)));
         enemies.forEach((e) => (e.av = 10000 / (e.spd || 100)));
-        state.selectedTargetId = enemies[0].id;
-        
-        // This triggers the state change to combat, drawing the arena in the background
-        processGameFlow();
-        
-        // 5. Wait for the canvas to draw the first frame of the arena, then fade out
-        requestAnimationFrame(() => {
-          loader.style.opacity = "0";
-          
-          setTimeout(() => {
-            loader.remove(); // Cleanup the DOM
-          }, 300); // 300ms matches the CSS transition time
-        });
 
+        // Set default target to first enemy
+        state.selectedTargetId = enemies[0].id;
+
+        // Start battle loop (renders first frame in background)
+        processGameFlow();
+
+        // Small delay to ensure first frame renders before removing loader
+        setTimeout(() => {
+          loader.style.opacity = "0";
+
+          // Remove loader after fade-out transition
+          setTimeout(() => {
+            loader.remove();
+          }, 300);
+        }, 200);
       });
     },
+
+    // Called when player performs an action
     (actionName, attackerData) => {
       executeCombatSequence(actionName, attackerData).then(() => {
+        // Reset turn and continue flow
         state.current = null;
         processGameFlow();
       });
