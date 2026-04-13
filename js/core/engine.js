@@ -62,7 +62,6 @@ function processGameFlow() {
 // Loads all images required for the current battle before starting
 function preloadBattleAssets(partyList, enemyList) {
   const assetsToLoad = [];
-  const CARD_SIZE = 64;
 
   // Collect all party image paths
   partyList.forEach((p) => {
@@ -74,28 +73,18 @@ function preloadBattleAssets(partyList, enemyList) {
     if (e.img) assetsToLoad.push(e.img);
   });
 
-  // Add fallback placeholder image to ensure it's cached
-  assetsToLoad.push(
-    `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`,
-  );
-
   // Load all assets asynchronously
   return Promise.all(
     assetsToLoad.map((src) => {
       return new Promise((resolve) => {
         const img = new Image();
 
-        // Enable CORS for external images
         if (src.startsWith("http")) {
           img.crossOrigin = "anonymous";
         }
 
         img.src = src;
-
-        // Resolve when image loads successfully
         img.onload = () => resolve(img);
-
-        // Resolve even if image fails (prevents soft-lock)
         img.onerror = () => {
           console.warn(`Battle asset failed to load: ${src}`);
           resolve(null);

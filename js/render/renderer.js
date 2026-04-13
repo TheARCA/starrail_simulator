@@ -32,7 +32,7 @@ import {
 } from "./ui.js";
 
 const imageCache = {};
-const PLACEHOLDER_SRC = `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`;
+// Removed the PLACEHOLDER_SRC constant completely!
 
 function getEntityImage(entity, isEnemy) {
   if (imageCache[entity.id]) return imageCache[entity.id];
@@ -40,23 +40,19 @@ function getEntityImage(entity, isEnemy) {
   const img = new Image();
   const folder = isEnemy ? "enemies" : "characters";
 
-  // The list of formats we want to try, in order!
   const extensions = ["png", "webp", "jpg", "jpeg"];
   let currentExtIndex = 0;
 
-  // Attempt to load the first format
   img.src = `assets/img/${folder}/${entity.id}.${extensions[currentExtIndex]}`;
 
-  // If it fails, try the next one on the list
   img.onerror = () => {
     currentExtIndex++;
 
     if (currentExtIndex < extensions.length) {
-      // Still have formats to try!
       img.src = `assets/img/${folder}/${entity.id}.${extensions[currentExtIndex]}`;
-    } else if (img.src !== PLACEHOLDER_SRC) {
-      // Exhausted all formats, time to use the gray DATA box
-      img.src = PLACEHOLDER_SRC;
+    } else {
+      // NEW: Instead of a gray box URL, we flag it so the renderer knows to draw it natively
+      img.isPlaceholder = true;
     }
   };
 
@@ -273,29 +269,48 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   // --- 4. PORTRAIT ---
   const portraitImg = getEntityImage(entity, isEnemy);
 
-  if (portraitImg.complete && portraitImg.naturalHeight !== 0) {
-    ctx.save();
+  // Calculate portrait box dimensions and chamfer cut
+  const px = x + 4;
+  const py = y + 4;
+  const pw = cardWidth - 8;
+  const ph = cardWidth - 8;
+  const cut = 8;
 
-    const px = x + 4;
-    const py = y + 4;
-    const pw = cardWidth - 8;
-    const ph = cardWidth - 8;
-    const cut = 8;
+  // Save canvas state before clipping
+  ctx.save();
 
-    ctx.beginPath();
-    ctx.moveTo(px + cut, py);
-    ctx.lineTo(px + pw, py);
-    ctx.lineTo(px + pw, py + ph);
-    ctx.lineTo(px, py + ph);
-    ctx.lineTo(px, py + cut);
-    ctx.closePath();
-    ctx.clip();
+  // Create chamfered clipping path for portrait
+  ctx.beginPath();
+  ctx.moveTo(px + cut, py);
+  ctx.lineTo(px + pw, py);
+  ctx.lineTo(px + pw, py + ph);
+  ctx.lineTo(px, py + ph);
+  ctx.lineTo(px, py + cut);
+  ctx.closePath();
+  ctx.clip();
+
+  // --- DRAW CONTENT INSIDE CLIP ---
+  if (portraitImg.isPlaceholder) {
+    // Draw placeholder background
+    ctx.fillStyle = "#47443b";
+    ctx.fillRect(px, py, pw, ph);
+
+    // Draw centered placeholder text
+    ctx.fillStyle = "#d7cfb8";
+    ctx.font = "800 14px 'NewRodin', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("DATA", px + pw / 2, py + ph / 2);
+  } else if (portraitImg.complete && portraitImg.naturalHeight !== 0) {
+    // Draw portrait image
     ctx.globalAlpha = 0.95;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(portraitImg, px, py, pw, ph);
-    ctx.restore();
   }
+
+  // Restore canvas state after drawing
+  ctx.restore();
 
   // --- 5. ENEMY WEAKNESSES (Docked Top-Right) ---
   if (isEnemy && entity.weaknesses && entity.weaknesses.length > 0) {
