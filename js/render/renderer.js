@@ -44,15 +44,18 @@ function getEntityImage(entity, isEnemy) {
   // This turns "e_baryon_1776105780056_605" back into "e_baryon"
   const baseImageId = entity.id.replace(/_\d+_\d+$/, "");
 
-  const extensions = ["png", "webp", "jpg", "jpeg"];
+  // Put 'webp' first since tb_destruction uses it!
+  const extensions = ["webp", "png", "jpg", "jpeg"];
   let currentExtIndex = 0;
 
+  // Use baseImageId here instead of entity.id
   img.src = `assets/img/${folder}/${baseImageId}.${extensions[currentExtIndex]}`;
 
   img.onerror = () => {
     currentExtIndex++;
 
     if (currentExtIndex < extensions.length) {
+      // Use baseImageId here too!
       img.src = `assets/img/${folder}/${baseImageId}.${extensions[currentExtIndex]}`;
     } else {
       img.isPlaceholder = true;
@@ -153,7 +156,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
 
   // --- REDESIGN: Sleeker, tighter card height ---
   const cardWidth = CARD_SIZE;
-  const cardHeight = CARD_SIZE + 40;
+  const cardHeight = CARD_SIZE + 60; // INCREASED: from 40 to 60
   const centerX = x + cardWidth / 2;
   const centerY = y + cardHeight / 2;
 
@@ -209,6 +212,25 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     !isTargeted &&
     !isAdjacent &&
     state.pendingAction;
+
+  // === NEW JUICE: INTERACTIVE HOVER TILT ===
+  if (entity.hp > 0) {
+    if (isHovered && !state.isAnimating) {
+      // 1. Pop the card forward slightly
+      entity.targetScale = 1.06;
+
+      // 2. Calculate tilt based on where the cursor is touching the card
+      const torque = (mouse.x - centerX) / (cardWidth / 2); // -1.0 to 1.0
+      entity.targetRotation = torque * 0.08; // Maximum 0.08 radians tilt
+      entity.targetOffsetY = -5; // Lift it slightly off the ground
+    } else {
+      // Reset smoothly when mouse leaves
+      entity.targetScale = 1.0;
+      entity.targetRotation = 0.0;
+      entity.targetOffsetY = 0;
+    }
+  }
+  // =========================================
 
   // --- RENDER TRANSFORM ---
   ctx.save();
@@ -289,19 +311,38 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   ctx.closePath();
   ctx.clip();
 
-  // --- THE FIX: Draw DATA while loading OR if it's missing ---
+  // --- DRAW CONTENT INSIDE CLIP ---
   if (
     portraitImg.complete &&
     portraitImg.naturalHeight !== 0 &&
     !portraitImg.isPlaceholder
   ) {
-    // Only draw the image if it has 100% finished downloading and isn't a placeholder
+    // === NEW JUICE: CHROMATIC IMPACT GLITCH ===
+    if (entity.flash > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      // Fade the glitch out as the flash decays
+      ctx.globalAlpha = entity.flash * 0.8;
+
+      // The harder the hit, the wider the colors split
+      let split = entity.flash * 15;
+
+      // Draw Red Shifted left
+      ctx.drawImage(portraitImg, px - split, py, pw, ph);
+      // Draw Cyan Shifted right
+      ctx.drawImage(portraitImg, px + split, py, pw, ph);
+
+      ctx.restore();
+    }
+    // ==========================================
+
+    // Draw standard portrait image over top
     ctx.globalAlpha = 0.95;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(portraitImg, px, py, pw, ph);
   } else {
-    // Draw the native placeholder as the default "loading" state
+    // THE FIX: Draw placeholder background as BOTH the "Loading" state and "Missing" state!
     ctx.fillStyle = "#47443b";
     ctx.fillRect(px, py, pw, ph);
 
@@ -376,7 +417,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   }
 
   // --- 6. NAME BANNER (Solid Band) ---
-  const bannerY = y + CARD_SIZE - 24;
+  const bannerY = y + CARD_SIZE - 2; // MOVED: Now sits directly below the portrait
   ctx.fillStyle = NIER_DARK;
   ctx.fillRect(x, bannerY, cardWidth, 22);
   ctx.font = "700 11px 'NewRodin', sans-serif";
@@ -616,23 +657,62 @@ function drawJuice() {
   for (let i = 0; i < state.fx.floatingTexts.length; i++) {
     let t = state.fx.floatingTexts[i];
     if (t.life <= 0) continue;
+
     ctx.save();
     ctx.translate(t.x, t.y);
     let startingLife = t.life > 1.0 ? 1.5 : 1.0;
     let scale = Math.max(0, Math.min(1, (startingLife - t.life) * 8));
     if (t.isCrit) scale *= 1.3;
     ctx.scale(scale, scale);
-    ctx.font = "800 48px 'NewRodin', sans-serif";
-    ctx.textAlign = "center";
+
     ctx.globalAlpha = Math.min(1, t.life);
     const sColor = t.isCrit ? NIER_DARK : NIER_LIGHT;
     const fColor = t.isCrit ? NIER_LIGHT : NIER_DARK;
+
+    // --- NEW JUICE: The Hex Data Subtitle ---
+    // Try to parse the floating text into an actual number
+    const dmgValue = parseInt(t.text);
+
+    // If it's a valid number (and not text like "MISS" or "RESIST")
+    if (!isNaN(dmgValue)) {
+      // Convert the number to a base-16 hex string and pad it to always be 4 digits
+      // e.g., 150 becomes "0x0096"
+      const hexString =
+        "0x" + dmgValue.toString(16).toUpperCase().padStart(4, "0");
+
+      ctx.save();
+
+      // Secondary Animation: Make it drift up and away from the main number as it dies
+      const floatOffset = (1.0 - Math.min(1, t.life)) * -15;
+
+      ctx.font = "800 12px 'NewRodin', monospace";
+      ctx.textAlign = "center";
+
+      // Make it slightly transparent so it's a subtle background detail
+      ctx.globalAlpha = Math.min(1, t.life) * 0.6;
+
+      // Color match the Nier theme (light for crits, dark for normal hits)
+      ctx.fillStyle = t.isCrit
+        ? "rgba(215, 207, 184, 1)"
+        : "rgba(71, 68, 59, 1)";
+
+      // Draw it 28 pixels above the center, minus the upward float offset
+      ctx.fillText(hexString, 0, -28 + floatOffset);
+
+      ctx.restore();
+    }
+
+    // --- MAIN DAMAGE NUMBER ---
+    ctx.font = "800 48px 'NewRodin', sans-serif";
+    ctx.textAlign = "center";
     drawTextWithCA(t.text, 0, 0, fColor, sColor, 8);
+
     ctx.restore();
   }
 }
 
 let currentCinematic = 0;
+let currentVignette = 0.3;
 
 function render() {
   updateFXPhysics();
@@ -695,7 +775,7 @@ function render() {
         );
         ctx.lineTo(
           targetEnemy.renderX + CARD_SIZE / 2 + (targetEnemy.offsetX || 0),
-          targetEnemy.renderY + CARD_SIZE + 40,
+          targetEnemy.renderY + CARD_SIZE + 60, // UPDATED to 60
         );
 
         // --- JUICE: High-Contrast Main Target Line ---
@@ -738,7 +818,7 @@ function render() {
             );
             ctx.lineTo(
               adj.renderX + CARD_SIZE / 2 + (adj.offsetX || 0),
-              adj.renderY + CARD_SIZE + 40,
+              adj.renderY + CARD_SIZE + 60, // UPDATED to 60
             );
 
             // --- JUICE: Stronger Adjacent Target Lines ---
@@ -791,6 +871,39 @@ function render() {
       state.fx.invert -= 1;
     }
   }
+
+  // === NEW JUICE: CRT SCANLINES & ACTION VIGNETTE ===
+  ctx.save();
+  // Reset transform so the overlay perfectly covers the screen despite camera shakes
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // 1. Scrolling Scanlines
+  ctx.fillStyle = "rgba(71, 68, 59, 0.04)";
+  const scanOffset = (performance.now() / 40) % 4;
+  for (let i = 0; i < canvas.height; i += 4) {
+    ctx.fillRect(0, i + scanOffset, canvas.width, 1);
+  }
+
+  // 2. Dynamic Action Vignette
+  // Darkens significantly when an attack animation is playing to build focus
+  let vigTarget = state.isAnimating ? 0.75 : 0.3;
+  currentVignette += (vigTarget - currentVignette) * 0.05;
+
+  let grad = ctx.createRadialGradient(
+    canvas.width / 2,
+    canvas.height / 2,
+    canvas.height * 0.4,
+    canvas.width / 2,
+    canvas.height / 2,
+    canvas.width * 0.8,
+  );
+  grad.addColorStop(0, "rgba(0,0,0,0)"); // Transparent center
+  grad.addColorStop(1, `rgba(20, 18, 15, ${currentVignette})`); // Dark edges
+
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  // ==================================================
 
   ctx.restore();
   requestAnimationFrame(render);
