@@ -218,19 +218,38 @@ export function drawActionBar() {
   if (allUnits.length === 0) return;
   allUnits.sort((a, b) => (a.av || 0) - (b.av || 0));
 
-  const startX = 40;
-  const startY = 80;
+  const startX = 60; // Pushed right to make room for the spine
+  const startY = 100;
   ctx.save();
   ctx.font = "400 12px 'NewRodin', sans-serif";
   ctx.textAlign = "left";
-  drawTextWithCA("ACTION ORDER", startX, startY - 20, "rgba(71, 68, 59, 0.7)");
+
+  // --- NIER JUICE: System Text ---
+  drawTextWithCA(
+    "SYS // TACTICAL_ORDER",
+    startX - 20,
+    startY - 30,
+    "rgba(71, 68, 59, 0.7)",
+  );
+  ctx.fillStyle = NIER_DARK;
+  ctx.fillRect(startX - 20, startY - 20, 160, 2); // Header underline
+
+  // --- NIER JUICE: The Vertical Timeline Spine ---
+  const spineX = startX - 20;
+  const maxItems = Math.min(allUnits.length, 8);
+  ctx.fillStyle = "rgba(71, 68, 59, 0.3)";
+  ctx.fillRect(spineX, startY, 2, maxItems * 55 - 10);
 
   allUnits.forEach((u, i) => {
     if (i > 7) return;
     const isPlayer = aliveParty.some((p) => p.id === u.id);
     const isActive = i === 0 && !state.isAnimating;
-    const xOffset = isActive ? 10 : 0;
+    const xOffset = isActive ? 15 : 0;
     const yPos = startY + i * 55;
+
+    // --- NIER JUICE: Spine Connectors ---
+    ctx.fillStyle = isActive ? NIER_DARK : "rgba(71, 68, 59, 0.3)";
+    ctx.fillRect(spineX, yPos + 22, 20 + xOffset, isActive ? 2 : 1);
 
     applyHardShadow();
     ctx.fillStyle = NIER_LIGHT;
@@ -240,20 +259,22 @@ export function drawActionBar() {
     ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
     ctx.fill();
 
-    // --- JUICE: Active Unit Pulse & Arrow ---
+    // --- NIER JUICE: Active Unit Diamond Anchor ---
     if (isActive) {
       const pulse = 0.5 + Math.abs(Math.sin(performance.now() / 200)) * 0.5;
       strokeWithCA(NIER_DARK, 1 + pulse * 2);
 
-      // Draw a sharp geometric arrow pointing to the active unit
+      ctx.save();
+      ctx.translate(spineX, yPos + 23);
+      ctx.rotate(performance.now() / 500); // Slowly rotating anchor
       ctx.fillStyle = NIER_DARK;
-      ctx.beginPath();
-      ctx.moveTo(startX - 6, yPos + 22.5);
-      ctx.lineTo(startX - 16, yPos + 14.5);
-      ctx.lineTo(startX - 16, yPos + 30.5);
-      ctx.fill();
+      ctx.fillRect(-4, -4, 8, 8);
+      ctx.restore();
     } else {
       strokeWithCA("rgba(71, 68, 59, 0.4)", 1);
+      // Small static anchor dot
+      ctx.fillStyle = "rgba(71, 68, 59, 0.5)";
+      ctx.fillRect(spineX - 2, yPos + 21, 4, 4);
     }
 
     ctx.fillStyle = isPlayer ? NIER_DARK : "rgba(71, 68, 59, 0.5)";
@@ -270,6 +291,7 @@ export function drawActionBar() {
       yPos + 24,
       NIER_LIGHT,
     );
+
     ctx.textAlign = "left";
     ctx.fillStyle = NIER_DARK;
     ctx.font = "600 14px 'NewRodin', sans-serif";
@@ -277,6 +299,7 @@ export function drawActionBar() {
     let displayName = u.name.toUpperCase();
     if (displayName.length > 8) displayName = displayName.substring(0, 8) + ".";
     drawTextWithCA(displayName, startX + xOffset + 48, yPos + 18, NIER_DARK);
+
     ctx.font = "400 12px 'NewRodin', sans-serif";
     drawTextWithCA(
       `AV: ${Math.ceil(u.av || 0)}`,
@@ -358,11 +381,18 @@ function drawSkillPoints() {
       strokeWithCA(`rgba(71, 68, 59, 1)`, 2);
     } else if (i < state.sp) {
       // --- NORMAL FILLED SP ---
-      applyHardShadow();
+      ctx.save();
+      // Custom tight shadow instead of the global deep shadow
+      ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+      ctx.shadowOffsetY = 2;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowBlur = 0;
+
       ctx.fillStyle = NIER_LIGHT;
       drawChamferedRect(px, startY, spW, spH, 3);
       ctx.fill();
-      clearShadow();
+      ctx.restore(); // Clears the custom shadow
+
       strokeWithCA(NIER_DARK, 1);
     } else {
       // --- NORMAL EMPTY SP ---
@@ -449,22 +479,47 @@ export function drawTotalDamage() {
 
 export function drawUI() {
   ctx.save();
+
+  // 1. The Base Shadowed Panel
   applyHardShadow();
   ctx.fillStyle = NIER_LIGHT;
+  ctx.beginPath();
   drawChamferedRect(UI_PANEL.x, UI_PANEL.y, UI_PANEL.w, UI_PANEL.h, 30);
   ctx.fill();
   clearShadow();
-  ctx.restore();
+
+  // 2. The Dark Stroke Border
+  ctx.beginPath();
   drawChamferedRect(UI_PANEL.x, UI_PANEL.y, UI_PANEL.w, UI_PANEL.h, 30);
   strokeWithCA("rgba(71, 68, 59, 0.3)", 1);
 
-  ctx.fillStyle = "rgba(71, 68, 59, 0.3)";
-  const time = performance.now() / 200;
+  // --- NIER JUICE: Internal Technical Grid ---
+  ctx.save();
+  ctx.beginPath();
+  drawChamferedRect(UI_PANEL.x, UI_PANEL.y, UI_PANEL.w, UI_PANEL.h, 30);
+  ctx.clip();
 
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(71, 68, 59, 0.04)";
+  ctx.lineWidth = 1;
+  const gridSize = 15;
+  for (let i = 0; i <= UI_PANEL.w; i += gridSize) {
+    ctx.moveTo(UI_PANEL.x + i, UI_PANEL.y);
+    ctx.lineTo(UI_PANEL.x + i, UI_PANEL.y + UI_PANEL.h);
+  }
+  for (let i = 0; i <= UI_PANEL.h; i += gridSize) {
+    ctx.moveTo(UI_PANEL.x, UI_PANEL.y + i);
+    ctx.lineTo(UI_PANEL.x + UI_PANEL.w, UI_PANEL.y + i);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // --- NIER JUICE: Audio Waveform Restored ---
   if (analyser && dataArray) {
     analyser.getByteFrequencyData(dataArray);
   }
 
+  ctx.fillStyle = "rgba(71, 68, 59, 0.3)";
   for (let i = 0; i < 40; i++) {
     // Start with a static, flat 4px baseline
     let h = 4;
@@ -477,6 +532,7 @@ export function drawUI() {
     ctx.fillRect(UI_PANEL.x + 40 + i * 6, UI_PANEL.y - 12 - h + 8, 3, h);
   }
 
+  // --- The Core Buttons ---
   if (state.current === STATES.PLAYER_TURN) {
     drawSkillPoints();
 
@@ -484,17 +540,20 @@ export function drawUI() {
       party.find((p) => p.id === state.activeUnitId) || party[0];
     if (activeChar && !state.isAnimating) {
       const logic = activeChar.combatLogic;
+
+      // Clean names without the messy "[ Q ]" baked in!
       let atkName = logic.basic.name;
       let skillName = logic.skill.name;
       let ultName = logic.ultimate.name;
 
+      // Define the keys separately to pass to the badge renderer
+      let atkKey = "Q";
+      let skillKey = "E";
+      let ultKey = "1";
+
       if (state.isEnhanced) {
-        atkName = "[ Q ] " + logic.ultimate.modes.blowoutBasic.name;
-        skillName = "[ E ] " + logic.ultimate.modes.blowoutSkill.name;
-      } else {
-        atkName = "[ Q ] " + logic.basic.name;
-        skillName = "[ E ] " + logic.skill.name;
-        ultName = "[ 1 ] " + logic.ultimate.name;
+        atkName = logic.ultimate.modes.blowoutBasic.name;
+        skillName = logic.ultimate.modes.blowoutSkill.name;
       }
 
       const atkActive = state.pendingAction === "ATTACK";
@@ -504,14 +563,30 @@ export function drawUI() {
       const canUlt = (activeChar.energy || 0) >= (logic.ultimate.cost || 120);
       const canSkill = state.sp > 0;
 
-      drawButton(btnAttack, atkName, atkActive, state.isEnhanced);
-      drawButton(btnSkill, skillName, skillActive, state.isEnhanced, !canSkill);
+      // Pass the shortcut key as the new 6th parameter
+      drawButton(
+        btnAttack,
+        atkName,
+        atkActive,
+        state.isEnhanced,
+        false,
+        atkKey,
+      );
+      drawButton(
+        btnSkill,
+        skillName,
+        skillActive,
+        state.isEnhanced,
+        !canSkill,
+        skillKey,
+      );
       if (!state.isEnhanced)
-        drawButton(btnUltimate, ultName, ultActive, false, !canUlt);
+        drawButton(btnUltimate, ultName, ultActive, false, !canUlt, ultKey);
     }
   }
 
   drawTooltip();
+  ctx.restore();
 }
 
 export function drawButton(
@@ -520,6 +595,7 @@ export function drawButton(
   forceActive = false,
   isEnhancedUI = false,
   isDisabled = false,
+  shortcutKey = null, // NEW: Optional shortcut badge
 ) {
   const hovered = isInside(mouse.x, mouse.y, btn) && !isDisabled;
   const isPlayerTurn =
@@ -533,12 +609,12 @@ export function drawButton(
 
   const renderY = hovered && isActive && !forceActive ? btn.y - 4 : btn.y;
   let textColor;
+
   if ((hovered && isActive) || forceActive) {
-    applyHardShadow();
+    // REMOVED SHADOWS HERE
     ctx.fillStyle = NIER_DARK;
     drawChamferedRect(btn.x, renderY, btn.w, btn.h, 15);
     ctx.fill();
-    clearShadow();
     textColor = NIER_LIGHT;
   } else {
     ctx.fillStyle = isEnhancedUI ? "#FFF" : "rgba(215, 207, 184, 0.5)";
@@ -550,18 +626,15 @@ export function drawButton(
 
   // --- JUICE: Kinetic Target Brackets ---
   if ((hovered && isActive && !isDisabled && !forceActive) || forceActive) {
-    // A slight breathing animation on the brackets
     const offset = 10 + Math.abs(Math.sin(performance.now() / 150)) * 3;
     ctx.fillStyle = NIER_DARK;
 
-    // Left target triangle
     ctx.beginPath();
     ctx.moveTo(btn.x - offset, renderY + btn.h / 2);
     ctx.lineTo(btn.x - (offset + 6), renderY + btn.h / 2 - 6);
     ctx.lineTo(btn.x - (offset + 6), renderY + btn.h / 2 + 6);
     ctx.fill();
 
-    // Right target triangle
     ctx.beginPath();
     ctx.moveTo(btn.x + btn.w + offset, renderY + btn.h / 2);
     ctx.lineTo(btn.x + btn.w + (offset + 6), renderY + btn.h / 2 - 6);
@@ -569,10 +642,12 @@ export function drawButton(
     ctx.fill();
   }
 
+  // --- TEXT RENDERING ---
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const { lines, fontSize } = getWrappedText(ctx, text, btn.w - 20, 20, 600);
   const textY = renderY + btn.h / 2;
+
   if (lines.length === 2) {
     drawTextWithCA(
       lines[0],
@@ -586,7 +661,35 @@ export function drawButton(
       textY + fontSize / 2 + 2,
       textColor,
     );
-  } else drawTextWithCA(lines[0], btn.x + btn.w / 2, textY, textColor);
+  } else {
+    drawTextWithCA(lines[0], btn.x + btn.w / 2, textY, textColor);
+  }
+
+  // === NEW JUICE: CORNER SHORTCUT BADGE ===
+  if (shortcutKey) {
+    const bW = 22;
+    const bH = 22;
+    const bX = btn.x - 8;
+    const bY = renderY - 8;
+
+    const isHighlight = (hovered && isActive) || forceActive;
+    const badgeBg = isHighlight ? NIER_LIGHT : NIER_DARK;
+    const badgeFg = isHighlight ? NIER_DARK : NIER_LIGHT;
+
+    // REMOVED SHADOWS HERE
+    ctx.fillStyle = badgeBg;
+    drawChamferedRect(bX, bY, bW, bH, 4);
+    ctx.fill();
+
+    strokeWithCA(isHighlight ? NIER_DARK : "rgba(71, 68, 59, 0.6)", 1);
+
+    ctx.fillStyle = badgeFg;
+    ctx.font = "800 12px 'NewRodin', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    drawTextWithCA(shortcutKey, bX + bW / 2, bY + bH / 2 + 1, badgeFg);
+  }
+
   ctx.restore();
 }
 

@@ -215,19 +215,22 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
 
   // === NEW JUICE: INTERACTIVE HOVER TILT ===
   if (entity.hp > 0) {
-    if (isHovered && !state.isAnimating) {
-      // 1. Pop the card forward slightly
-      entity.targetScale = 1.06;
+    // THE FIX: The entire hover engine goes to sleep during attack animations
+    if (!state.isAnimating) {
+      if (isHovered) {
+        // 1. Pop the card forward slightly
+        entity.targetScale = 1.06;
 
-      // 2. Calculate tilt based on where the cursor is touching the card
-      const torque = (mouse.x - centerX) / (cardWidth / 2); // -1.0 to 1.0
-      entity.targetRotation = torque * 0.08; // Maximum 0.08 radians tilt
-      entity.targetOffsetY = -5; // Lift it slightly off the ground
-    } else {
-      // Reset smoothly when mouse leaves
-      entity.targetScale = 1.0;
-      entity.targetRotation = 0.0;
-      entity.targetOffsetY = 0;
+        // 2. Calculate tilt based on where the cursor is touching the card
+        const torque = (mouse.x - centerX) / (cardWidth / 2); // -1.0 to 1.0
+        entity.targetRotation = torque * 0.08; // Maximum 0.08 radians tilt
+        entity.targetOffsetY = -5; // Lift it slightly off the ground
+      } else {
+        // Reset smoothly when mouse leaves
+        entity.targetScale = 1.0;
+        entity.targetRotation = 0.0;
+        entity.targetOffsetY = 0;
+      }
     }
   }
   // =========================================
