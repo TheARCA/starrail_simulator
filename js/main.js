@@ -1,10 +1,13 @@
 import { initVisuals } from "./render/renderer.js";
 import { initEngine } from "./core/engine.js";
 
-// 1. Define only the absolute necessary assets to load first
+// Ensure CARD_SIZE is defined here or imported from your config/constants file
+const CARD_SIZE = 64; // Adjust to your actual constant
+
+// 1. Define all essential local and external assets
 const essentialImages = [
   "assets/img/characters/tb_destruction.webp",
-  // Add other critical day-1 images like UI sprites or enemy sprites here
+  `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`
 ];
 
 async function bootEngine() {
@@ -12,13 +15,18 @@ async function bootEngine() {
   const progressFill = document.getElementById("progressFill");
   let loadedCount = 0;
 
-  // 2. Create promises for all essential images
+  // 2. Create promises for all essential images (handles both local relative paths and absolute HTTP URLs)
   const imagePromises = essentialImages.map((src) => {
     return new Promise((resolve) => {
       const img = new Image();
-      img.src = src;
+      
+      // Critical for external URLs drawn to Canvas to avoid tainting the context
+      if (src.startsWith('http')) {
+        img.crossOrigin = "anonymous";
+      }
 
-      // Resolve on both load and error so a missing file doesn't infinitely hang the sim
+      img.src = src;
+      
       img.onload = () => {
         loadedCount++;
         progressFill.style.width = `${(loadedCount / essentialImages.length) * 100}%`;
@@ -26,26 +34,21 @@ async function bootEngine() {
       };
       img.onerror = () => {
         console.warn(`Failed to preload: ${src}`);
-        resolve(null);
+        resolve(null); 
       };
     });
   });
 
-  // 3. Wait for the NewRodin font to be ready (critical for Canvas text rendering)
   const fontPromise = document.fonts.ready;
 
-  // 4. Await all assets
   await Promise.all([...imagePromises, fontPromise]);
 
-  // 5. Fade out and initialize
   loadingScreen.style.opacity = "0";
   setTimeout(() => {
-    loadingScreen.remove(); // Remove from DOM entirely
-
-    // Kick off the game loop coordinate now that assets are hot
+    loadingScreen.remove(); 
     initEngine();
     initVisuals();
-  }, 500); // matches the 0.5s CSS transition
+  }, 500); 
 }
 
 bootEngine();
