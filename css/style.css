@@ -89,3 +89,21 @@ canvas {
   background-color: #d7cfb8;
   transition: width 0.1s ease-out;
 }
+
+#battleLoadingScreen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #413f3a; /* Swapped to the solid HSR dark gray/brown */
+  /* backdrop-filter: blur(10px); <-- Removed the blur completely */
+  color: #d7cfb8;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 99;
+  transition: opacity 0.3s ease-out;
+  font-family: "NewRodin", sans-serif;
+  pointer-events: all;
+}

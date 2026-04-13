@@ -7,7 +7,7 @@ const CARD_SIZE = 64; // Adjust to your actual constant
 // 1. Define all essential local and external assets
 const essentialImages = [
   "assets/img/characters/tb_destruction.webp",
-  `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`
+  `https://placehold.co/${CARD_SIZE}x${CARD_SIZE}/47443b/d7cfb8/png?text=DATA`,
 ];
 
 async function bootEngine() {
@@ -19,14 +19,14 @@ async function bootEngine() {
   const imagePromises = essentialImages.map((src) => {
     return new Promise((resolve) => {
       const img = new Image();
-      
+
       // Critical for external URLs drawn to Canvas to avoid tainting the context
-      if (src.startsWith('http')) {
+      if (src.startsWith("http")) {
         img.crossOrigin = "anonymous";
       }
 
       img.src = src;
-      
+
       img.onload = () => {
         loadedCount++;
         progressFill.style.width = `${(loadedCount / essentialImages.length) * 100}%`;
@@ -34,7 +34,7 @@ async function bootEngine() {
       };
       img.onerror = () => {
         console.warn(`Failed to preload: ${src}`);
-        resolve(null); 
+        resolve(null);
       };
     });
   });
@@ -45,10 +45,10 @@ async function bootEngine() {
 
   loadingScreen.style.opacity = "0";
   setTimeout(() => {
-    loadingScreen.remove(); 
+    loadingScreen.remove();
     initEngine();
     initVisuals();
-  }, 500); 
+  }, 500);
 }
 
 bootEngine();
