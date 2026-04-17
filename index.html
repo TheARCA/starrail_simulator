@@ -5,9 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HSR ENGINE - Simulator Hub</title>
 
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#000000">
-
     <link rel="icon" href="data:," />
 
     <link rel="stylesheet" href="css/style.css" />
@@ -23,14 +20,5 @@
     <canvas id="gameCanvas"></canvas>
 
     <script type="module" src="js/main.js"></script>
-    <script>
-       if ('serviceWorker' in navigator) {
-          window.addEventListener('load', () => {
-             navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('Service Worker registered'))
-                .catch(err => console.error('Service Worker failed', err));
-           });
-        }
-    </script>
   </body>
 </html>
