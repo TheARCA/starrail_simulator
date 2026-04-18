@@ -1,36 +1,65 @@
+import { initEngine } from "./core/engine.js";
+import { DATABASE_HEROES } from "./data/characters/index.js";
+import { DATABASE_ENEMIES } from "./data/enemies/index.js";
 import { initVisuals } from "./render/renderer.js";
-import { initCombatSandbox } from "./modes/combat_sandbox.js";
 
-// 1. Define only essential local assets (removed the external placeholder)
-const essentialImages = ["assets/img/characters/tb_destruction.webp"];
+const IMAGE_EXTENSIONS = ["webp", "png", "jpg", "jpeg"];
+
+function getEssentialPortraits() {
+  return [
+    ...DATABASE_HEROES.map((hero) => ({
+      folder: "characters",
+      id: hero.id,
+    })),
+    ...DATABASE_ENEMIES.map((enemy) => ({
+      folder: "enemies",
+      id: enemy.id,
+    })),
+  ];
+}
+
+function preloadPortrait({ folder, id }, onComplete) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    let currentExtIndex = 0;
+
+    const finish = (asset) => {
+      onComplete();
+      resolve(asset);
+    };
+
+    const tryNextExtension = () => {
+      if (currentExtIndex >= IMAGE_EXTENSIONS.length) {
+        console.warn(`Failed to preload portrait for ${id}`);
+        finish(null);
+        return;
+      }
+
+      img.src = `assets/img/${folder}/${id}.${IMAGE_EXTENSIONS[currentExtIndex]}`;
+      currentExtIndex++;
+    };
+
+    img.onload = () => finish(img);
+    img.onerror = tryNextExtension;
+
+    tryNextExtension();
+  });
+}
 
 async function bootEngine() {
   const loadingScreen = document.getElementById("loadingScreen");
   const progressFill = document.getElementById("progressFill");
+  const essentialPortraits = getEssentialPortraits();
   let loadedCount = 0;
 
-  const imagePromises = essentialImages.map((src) => {
-    return new Promise((resolve) => {
-      const img = new Image();
+  const updateProgress = () => {
+    loadedCount++;
+    progressFill.style.width = `${(loadedCount / essentialPortraits.length) * 100}%`;
+  };
 
-      // Keep this just in case you ever add a different external URL later
-      if (src.startsWith("http")) {
-        img.crossOrigin = "anonymous";
-      }
-
-      img.src = src;
-
-      img.onload = () => {
-        loadedCount++;
-        progressFill.style.width = `${(loadedCount / essentialImages.length) * 100}%`;
-        resolve(img);
-      };
-      img.onerror = () => {
-        console.warn(`Failed to preload: ${src}`);
-        resolve(null);
-      };
-    });
-  });
+  const imagePromises = essentialPortraits.map((portrait) =>
+    preloadPortrait(portrait, updateProgress),
+  );
 
   const fontPromise = document.fonts.ready;
 
@@ -39,7 +68,7 @@ async function bootEngine() {
   loadingScreen.style.opacity = "0";
   setTimeout(() => {
     loadingScreen.remove();
-    initCombatSandbox();
+    initEngine();
     initVisuals();
   }, 500);
 }

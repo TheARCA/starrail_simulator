@@ -12,9 +12,38 @@ import {
 import { DATABASE_HEROES, party } from "../data/characters/index.js";
 import { DATABASE_ENEMIES, enemies } from "../data/enemies/index.js";
 import { initAudio, playUIClick } from "../core/audio_manager.js";
-import { isInside, getMenuRect } from "../render/ui_combat.js";
+import { isInside, getMenuRect } from "../render/ui.js";
 
 let isInitialized = false;
+
+function skillTargetsAlly(activeChar) {
+  return activeChar?.combatLogic?.skill?.targetType === "Ally";
+}
+
+function setPendingAction(action, activeChar) {
+  state.pendingAction = action;
+  state.selectedTargetId = null;
+  state.selectedAllyId = null;
+
+  if (action === "SKILL" && skillTargetsAlly(activeChar)) {
+    state.selectedAllyId = activeChar?.id || null;
+  }
+}
+
+function armOrExecuteAction(action, activeChar, onExecuteCombat) {
+  if (state.pendingAction === action) {
+    onExecuteCombat(action, activeChar);
+    return;
+  }
+
+  setPendingAction(action, activeChar);
+}
+
+function canUseUltimate(char) {
+  if (!char || char.hp <= 0) return false;
+  const ultCost = char.combatLogic?.ultimate?.cost || 120;
+  return (char.energy || 0) >= ultCost;
+}
 
 export function initInputs(onStartBattle, onExecuteCombat) {
   if (isInitialized) return;
@@ -88,9 +117,13 @@ export function initInputs(onStartBattle, onExecuteCombat) {
     const activeChar =
       party.find((p) => p.id === state.activeUnitId) || party[0];
     if (!activeChar) return;
+    const isAllySkillTargeting =
+      state.pendingAction === "SKILL" && skillTargetsAlly(activeChar);
 
     const aliveEnemies = enemies.filter((e) => e.hp > 0);
+    const aliveParty = party.filter((p) => p.hp > 0);
     let clickedEnemyId = null;
+    let clickedAllyId = null;
 
     aliveEnemies.forEach((enemy) => {
       if (enemy.renderX !== undefined) {
@@ -104,7 +137,30 @@ export function initInputs(onStartBattle, onExecuteCombat) {
       }
     });
 
-    if (clickedEnemyId) {
+    if (isAllySkillTargeting) {
+      aliveParty.forEach((hero) => {
+        if (hero.renderX !== undefined) {
+          const cardRect = {
+            x: hero.renderX,
+            y: hero.renderY,
+            w: CARD_SIZE,
+            h: CARD_SIZE + 100,
+          };
+          if (isInside(mouse.x, mouse.y, cardRect)) clickedAllyId = hero.id;
+        }
+      });
+    }
+
+    if (clickedAllyId) {
+      if (state.selectedAllyId === clickedAllyId) {
+        onExecuteCombat(state.pendingAction, activeChar);
+      } else {
+        state.selectedAllyId = clickedAllyId;
+      }
+      return;
+    }
+
+    if (clickedEnemyId && !isAllySkillTargeting) {
       if (state.selectedTargetId === clickedEnemyId && state.pendingAction) {
         // Double-click on target triggers combat!
         onExecuteCombat(state.pendingAction, activeChar);
@@ -136,6 +192,11 @@ export function initInputs(onStartBattle, onExecuteCombat) {
   canvas.addEventListener("mouseup", (e) => {
     mouse.isDown = false;
 
+    if (state.current !== STATES.PLAYER_TURN || state.isAnimating) {
+      mouse.heldAction = null;
+      return;
+    }
+
     if (mouse.heldAction) {
       const holdDuration = performance.now() - mouse.holdStart;
       if (holdDuration < 300) {
@@ -143,9 +204,9 @@ export function initInputs(onStartBattle, onExecuteCombat) {
           party.find((p) => p.id === state.activeUnitId) || party[0];
 
         if (mouse.heldAction === "ATTACK") {
-          state.pendingAction = "ATTACK";
+          armOrExecuteAction("ATTACK", activeChar, onExecuteCombat);
         } else if (mouse.heldAction === "SKILL") {
-          state.pendingAction = "SKILL";
+          armOrExecuteAction("SKILL", activeChar, onExecuteCombat);
         } else if (mouse.heldAction === "ULTIMATE") {
           const ultCost = activeChar.combatLogic.ultimate.cost || 120;
           if (activeChar.combatLogic.ultimate.tag === "Enhance") {
@@ -153,7 +214,7 @@ export function initInputs(onStartBattle, onExecuteCombat) {
             activeChar.energy -= ultCost;
             state.fx.flash = 0.4;
           } else {
-            state.pendingAction = "ULTIMATE";
+            armOrExecuteAction("ULTIMATE", activeChar, onExecuteCombat);
           }
         }
       }
@@ -165,56 +226,87 @@ export function initInputs(onStartBattle, onExecuteCombat) {
   window.addEventListener("keydown", (e) => {
     initAudio();
 
+    const key = e.key.toLowerCase();
+
+    if (
+      ["1", "2", "3", "4"].includes(key) &&
+      state.current !== STATES.MAIN_MENU &&
+      state.current !== STATES.GAME_OVER &&
+      !state.isAnimating
+    ) {
+      const partyIndex = parseInt(key) - 1;
+      const char = party[partyIndex];
+      if (canUseUltimate(char)) {
+        playUIClick();
+        if (
+          char.combatLogic.ultimate.tag === "Enhance" &&
+          !state.isEnhanced
+        ) {
+          state.isEnhanced = true;
+          char.energy -= char.combatLogic.ultimate.cost || 120;
+          state.fx.flash = 0.4;
+        } else if (!state.isEnhanced) {
+          setPendingAction("ULTIMATE", char);
+          onExecuteCombat("ULTIMATE", char, { interruptUltimate: true });
+        }
+      }
+      return;
+    }
+
     if (state.current !== STATES.PLAYER_TURN || state.isAnimating) return;
 
     playUIClick(); // Play beep for valid combat hotkeys
 
-    const key = e.key.toLowerCase();
     const aliveEnemies = enemies.filter((en) => en.hp > 0);
-    if (aliveEnemies.length === 0) return;
+    const aliveParty = party.filter((hero) => hero.hp > 0);
+    const isAllySkillTargeting =
+      state.pendingAction === "SKILL" && skillTargetsAlly(party.find((p) => p.id === state.activeUnitId));
+    if (aliveEnemies.length === 0 && !isAllySkillTargeting) return;
 
     // Target selection
     if (key === "a" || key === "d") {
-      let currentIndex = aliveEnemies.findIndex(
-        (en) => en.id === state.selectedTargetId,
-      );
-      if (currentIndex === -1) currentIndex = 0;
-      if (key === "a")
-        currentIndex =
-          (currentIndex - 1 + aliveEnemies.length) % aliveEnemies.length;
-      else if (key === "d")
-        currentIndex = (currentIndex + 1) % aliveEnemies.length;
-      state.selectedTargetId = aliveEnemies[currentIndex].id;
+      if (isAllySkillTargeting && aliveParty.length > 0) {
+        let currentIndex = aliveParty.findIndex(
+          (hero) => hero.id === state.selectedAllyId,
+        );
+        if (currentIndex === -1) currentIndex = 0;
+        if (key === "a") {
+          currentIndex = (currentIndex - 1 + aliveParty.length) % aliveParty.length;
+        } else {
+          currentIndex = (currentIndex + 1) % aliveParty.length;
+        }
+        state.selectedAllyId = aliveParty[currentIndex].id;
+      } else {
+        let currentIndex = aliveEnemies.findIndex(
+          (en) => en.id === state.selectedTargetId,
+        );
+        if (currentIndex === -1) currentIndex = 0;
+        if (key === "a") {
+          currentIndex =
+            (currentIndex - 1 + aliveEnemies.length) % aliveEnemies.length;
+        } else {
+          currentIndex = (currentIndex + 1) % aliveEnemies.length;
+        }
+        state.selectedTargetId = aliveEnemies[currentIndex].id;
+      }
     }
 
     if (key === "q") {
-      state.pendingAction = "ATTACK";
+      const activeChar =
+        party.find((p) => p.id === state.activeUnitId) || party[0];
+      armOrExecuteAction("ATTACK", activeChar, onExecuteCombat);
     } else if (key === "e") {
       // --- FIXED: Keyboard restriction
-      if (state.sp > 0) state.pendingAction = "SKILL";
-    }
-
-    // Ultimate Hijack System
-    if (["1", "2", "3", "4"].includes(key)) {
-      const partyIndex = parseInt(key) - 1;
-      const char = party[partyIndex];
-      if (char && char.hp > 0) {
-        const ultCost = char.combatLogic.ultimate.cost || 120;
-        if (char.energy >= ultCost) {
-          if (
-            char.combatLogic.ultimate.tag === "Enhance" &&
-            !state.isEnhanced
-          ) {
-            state.isEnhanced = true;
-            char.energy -= ultCost;
-            state.fx.flash = 0.4;
-          } else if (!state.isEnhanced) {
-            state.pendingAction = "ULTIMATE";
-            // Trigger Ultimate Free Action immediately!
-            onExecuteCombat("ULTIMATE", char);
-          }
-        }
+      if (state.sp > 0) {
+        const activeChar =
+          party.find((p) => p.id === state.activeUnitId) || party[0];
+        armOrExecuteAction("SKILL", activeChar, onExecuteCombat);
       }
+    } else if (key === "w") {
+      state.pendingAction = null;
+      state.selectedTargetId = null;
+      state.selectedAllyId = null;
+      mouse.heldAction = null;
     }
 
     // Spacebar to execute

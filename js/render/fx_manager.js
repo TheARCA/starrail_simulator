@@ -1,11 +1,13 @@
 import { state, GAME_WIDTH, GAME_HEIGHT, CARD_SIZE } from "../core/state.js";
 
 const MAX_PARTICLES = 250;
+const MAX_SLASHES = 40;
 const MAX_TEXTS = 30;
 const MAX_STRINGS = 50;
 const MAX_SHOCKS = 15;
 
 let pIdx = 0;
+let lIdx = 0;
 let tIdx = 0;
 let sIdx = 0;
 let dIdx = 0;
@@ -15,8 +17,37 @@ export function spawnJuice(
   damageText,
   isCrit,
   shakeAmount,
-  particleColor,
+  fxStyleOrColor,
 ) {
+  const fxStyle =
+    typeof fxStyleOrColor === "string"
+      ? {
+          particleColor: fxStyleOrColor,
+          textColor: isCrit ? "#d7cfb8" : "#47443b",
+          shockwaveMaxRadius: isCrit ? 200 : 100,
+          shockwaveWidth: isCrit ? 16 : 8,
+          particleCount: isCrit ? 60 : 20,
+          particleSpeedMin: 5,
+          particleSpeedMax: isCrit ? 45 : 25,
+          particleMode: "burst",
+          dataCodes: ["0xFF", "ERR", "NULL", "0x00", "WARN", "CRIT"],
+        }
+      : {
+          particleColor: fxStyleOrColor?.particleColor || "#47443b",
+          textColor: fxStyleOrColor?.textColor || (isCrit ? "#d7cfb8" : "#47443b"),
+          shockwaveMaxRadius:
+            fxStyleOrColor?.shockwaveMaxRadius || (isCrit ? 200 : 100),
+          shockwaveWidth: fxStyleOrColor?.shockwaveWidth || (isCrit ? 16 : 8),
+          particleCount:
+            fxStyleOrColor?.particleCount || (isCrit ? 60 : 20),
+          particleSpeedMin: fxStyleOrColor?.particleSpeedMin || 5,
+          particleSpeedMax:
+            fxStyleOrColor?.particleSpeedMax || (isCrit ? 45 : 25),
+          particleMode: fxStyleOrColor?.particleMode || "burst",
+          dataCodes:
+            fxStyleOrColor?.dataCodes || ["0xFF", "ERR", "NULL", "0x00", "WARN", "CRIT"],
+        };
+
   state.fx.shake = Math.max(
     state.fx.shake,
     isCrit ? shakeAmount * 1.5 : shakeAmount,
@@ -40,10 +71,10 @@ export function spawnJuice(
     x: tx,
     y: ty,
     radius: 10,
-    maxRadius: isCrit ? 200 : 100,
-    width: isCrit ? 16 : 8,
+    maxRadius: fxStyle.shockwaveMaxRadius,
+    width: fxStyle.shockwaveWidth,
     life: 1.0,
-    color: particleColor,
+    color: fxStyle.particleColor,
   };
   sIdx = (sIdx + 1) % MAX_SHOCKS;
 
@@ -54,37 +85,119 @@ export function spawnJuice(
       isCrit && typeof damageText === "number"
         ? `CRIT ${damageText}!`
         : `${damageText}`,
-    color: isCrit ? "#d7cfb8" : "#47443b",
+    color: fxStyle.textColor,
     life: 1.0,
     isCrit: isCrit,
     vy: isCrit ? -18 : -12,
   };
   tIdx = (tIdx + 1) % MAX_TEXTS;
 
-  const hexCodes = ["0xFF", "ERR", "NULL", "0x00", "WARN", "CRIT"];
   for (let i = 0; i < (isCrit ? 8 : 3); i++) {
     state.fx.dataStrings[dIdx] = {
       x: tx + (Math.random() - 0.5) * 120,
       y: ty + (Math.random() - 0.5) * 120,
-      text: hexCodes[Math.floor(Math.random() * hexCodes.length)],
+      text: fxStyle.dataCodes[Math.floor(Math.random() * fxStyle.dataCodes.length)],
       life: 1.0,
       vy: Math.random() * -6 - 2,
     };
     dIdx = (dIdx + 1) % MAX_STRINGS;
   }
 
-  const particleCount = isCrit ? 60 : 20;
+  const particleCount = fxStyle.particleCount;
   for (let i = 0; i < particleCount; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = Math.random() * (isCrit ? 40 : 20) + 5;
+    let angle = Math.random() * Math.PI * 2;
+    if (fxStyle.particleMode === "column") {
+      angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+    } else if (fxStyle.particleMode === "flare") {
+      angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.4;
+    } else if (fxStyle.particleMode === "zigzag") {
+      angle = (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 4 + Math.random() * 0.8);
+    } else if (fxStyle.particleMode === "sweep") {
+      angle = Math.PI + (Math.random() - 0.5) * 1.2;
+    } else if (fxStyle.particleMode === "orbit") {
+      angle = Math.random() * Math.PI * 2;
+    } else if (fxStyle.particleMode === "pillar") {
+      angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.35;
+    }
+
+    const speed =
+      Math.random() * (fxStyle.particleSpeedMax - fxStyle.particleSpeedMin) +
+      fxStyle.particleSpeedMin;
+    const vyBias =
+      fxStyle.particleMode === "flare" || fxStyle.particleMode === "column"
+        ? -4
+        : fxStyle.particleMode === "pillar"
+          ? -8
+          : 0;
     state.fx.particles[pIdx] = {
       x: tx,
       y: ty,
       vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
+      vy: Math.sin(angle) * speed + vyBias,
       life: 1.0,
-      color: particleColor,
+      color: fxStyle.particleColor,
       size: Math.random() * 8 + 3,
+      floorY: GAME_HEIGHT - Math.random() * 40,
+    };
+    pIdx = (pIdx + 1) % MAX_PARTICLES;
+  }
+
+  const slashCount = isCrit ? 3 : 1;
+  for (let i = 0; i < slashCount; i++) {
+    state.fx.slashes[lIdx] = {
+      x: tx,
+      y: ty + (Math.random() - 0.5) * 24,
+      angle: (Math.random() - 0.5) * 0.8 + (isCrit ? 0.15 : -0.1),
+      length: (isCrit ? 180 : 120) + Math.random() * 60,
+      width: (isCrit ? 16 : 10) + Math.random() * 4,
+      life: 1.0,
+      color: fxStyle.particleColor,
+      driftX: (Math.random() - 0.5) * 8,
+      driftY: -2 - Math.random() * 3,
+    };
+    lIdx = (lIdx + 1) % MAX_SLASHES;
+  }
+}
+
+export function spawnShieldJuice(target) {
+  const tx =
+    (target.renderX || GAME_WIDTH / 2) + CARD_SIZE / 2 + (target.offsetX || 0);
+  const ty =
+    (target.renderY || GAME_HEIGHT / 2) + CARD_SIZE / 2 + (target.offsetY || 0);
+
+  state.fx.shockwaves[sIdx] = {
+    x: tx,
+    y: ty,
+    radius: 18,
+    maxRadius: 150,
+    width: 10,
+    life: 1.0,
+    color: "#d7cfb8",
+  };
+  sIdx = (sIdx + 1) % MAX_SHOCKS;
+
+  state.fx.floatingTexts[tIdx] = {
+    x: tx,
+    y: ty - 10,
+    text: "SHIELD",
+    color: "#d7cfb8",
+    life: 1.2,
+    isCrit: false,
+    vy: -8,
+  };
+  tIdx = (tIdx + 1) % MAX_TEXTS;
+
+  for (let i = 0; i < 24; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 14 + 4;
+    state.fx.particles[pIdx] = {
+      x: tx,
+      y: ty,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 4,
+      life: 1.0,
+      color: "#d7cfb8",
+      size: Math.random() * 6 + 2,
       floorY: GAME_HEIGHT - Math.random() * 40,
     };
     pIdx = (pIdx + 1) % MAX_PARTICLES;
@@ -174,6 +287,15 @@ export function updateFXPhysics() {
       p.vx *= 0.7;
     }
     p.life -= 0.02;
+  }
+  for (let i = 0; i < state.fx.slashes.length; i++) {
+    let slash = state.fx.slashes[i];
+    if (!slash || slash.life <= 0) continue;
+    slash.x += slash.driftX;
+    slash.y += slash.driftY;
+    slash.length *= 0.96;
+    slash.width *= 0.94;
+    slash.life -= 0.07;
   }
   for (let i = 0; i < state.fx.dataStrings.length; i++) {
     let d = state.fx.dataStrings[i];

@@ -1,4 +1,5 @@
 import { EventBus } from "../core/event_bus.js";
+import { addActionGauge, syncActionValue } from "../utils/speed.js";
 
 export function initBreakSystem() {
   console.log("SYS // Break System Online");
@@ -14,7 +15,7 @@ export function initBreakSystem() {
       1.5 * (1 + effectHitRate) * (1 - effectRes),
     );
 
-    let actualDelay = 2500 / (target.spd || 100);
+    let actionDelayGauge = 2500;
     target.debuffs = target.debuffs || [];
 
     let dName = "BLEED",
@@ -37,16 +38,15 @@ export function initBreakSystem() {
       dName = "ENTANGLEMENT";
       dType = "Delay";
       dDur = 1;
-      actualDelay = (2000 * (1 + breakEffect)) / (target.spd || 100);
+      actionDelayGauge = 2000 * (1 + breakEffect);
     } else if (element === "Imaginary") {
       dName = "IMPRISONMENT";
       dType = "Delay";
       dDur = 1;
-      actualDelay = (3000 * (1 + breakEffect)) / (target.spd || 100);
-      target.spd = (target.spd || 100) * 0.9;
+      actionDelayGauge = 3000 * (1 + breakEffect);
     }
 
-    target.av += actualDelay;
+    addActionGauge(target, actionDelayGauge);
 
     if (Math.random() >= Math.min(1, breakDebuffChance)) {
       return;
@@ -57,13 +57,20 @@ export function initBreakSystem() {
       existing.duration = dDur;
       if (element === "Wind")
         existing.stacks = Math.min(5, (existing.stacks || 1) + dStacks);
+      if (element === "Imaginary") {
+        syncActionValue(target);
+      }
     } else {
+      if (element === "Imaginary") {
+        target.spdPct = (target.spdPct || 0) - 0.1;
+      }
       target.debuffs.push({
         name: dName,
         type: dType,
         duration: dDur,
         stacks: dStacks,
         attacker: attacker,
+        spdPctDelta: element === "Imaginary" ? -0.1 : 0,
       });
     }
   });

@@ -10,10 +10,14 @@ export const state = {
   isAnimating: false,
   isEnhanced: false,
   selectedTargetId: null,
+  selectedAllyId: null,
 
   activeUnitId: null,
+  extraTurnUnitId: null,
   pendingAction: null,
   activeSkillName: null,
+  pendingEnemyActionTimer: null,
+  followUpQueue: [],
 
   sp: 3,
   maxSp: 5,
@@ -24,6 +28,7 @@ export const state = {
     invert: 0,
     cinematic: false,
     particles: [],
+    slashes: [],
     floatingTexts: [],
     dataStrings: [],
     shockwaves: [],
@@ -41,7 +46,7 @@ export const mouse = {
 export const GAME_WIDTH = 1920;
 export const GAME_HEIGHT = 1080;
 export const CARD_SIZE = 180;
-export const UI_PANEL = { x: 420, y: 880, w: 1080, h: 120 };
+export const UI_PANEL = { x: 300, y: 826, w: 1320, h: 198 };
 export const btnAttack = { x: 460, y: 910, w: 300, h: 60 };
 export const btnSkill = { x: 810, y: 910, w: 300, h: 60 };
 export const btnUltimate = { x: 1160, y: 910, w: 300, h: 60 };

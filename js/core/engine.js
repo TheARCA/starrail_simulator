@@ -1,4 +1,4 @@
-import { STATES, state } from "./state.js";
+import { STATES, state, mouse } from "./state.js";
 import { party } from "../data/characters/index.js";
 import { enemies } from "../data/enemies/index.js";
 import { initInputs } from "../systems/input.js";
@@ -15,6 +15,14 @@ import {
 import { EventBus } from "./event_bus.js";
 import { initMechanics } from "../mechanics/status_manager.js";
 import { initBreakSystem } from "../mechanics/break_system.js";
+import { initializeSpeedState, resetActionValue } from "../utils/speed.js";
+
+function clearPendingEnemyActionTimer() {
+  if (state.pendingEnemyActionTimer) {
+    clearTimeout(state.pendingEnemyActionTimer);
+    state.pendingEnemyActionTimer = null;
+  }
+}
 
 // Main loop that controls battle flow and turn progression
 function processGameFlow() {
@@ -32,17 +40,18 @@ function processGameFlow() {
           state.isAnimating = false;
 
           if (!canAct) {
-            if (nextUnit.hp > 0 && nextUnit.av <= 0)
-              nextUnit.av = 10000 / (nextUnit.spd || 100);
+            if (nextUnit.hp > 0 && nextUnit.av <= 0) resetActionValue(nextUnit);
             state.current = null;
             processGameFlow();
           } else {
             // If it's enemy turn, perform enemy action
             if (state.current === STATES.ENEMY_TURN) {
-              state.isAnimating = true;
+              clearPendingEnemyActionTimer();
 
-              // Small delay before enemy acts (for pacing)
-              setTimeout(() => {
+              // Small delay before enemy acts (for pacing / interrupt window)
+              state.pendingEnemyActionTimer = setTimeout(() => {
+                state.pendingEnemyActionTimer = null;
+                state.isAnimating = true;
                 enemyAction(nextUnit).then(() => {
                   processGameFlow();
                 });
@@ -112,9 +121,26 @@ export function initEngine() {
         preloadBattleAssets(party, enemies),
         minimumLoadingTime,
       ]).then(() => {
-        party.forEach((p) => (p.av = 10000 / (p.spd || 100)));
-        enemies.forEach((e) => (e.av = 10000 / (e.spd || 100)));
-        state.selectedTargetId = enemies[0].id;
+        state.pendingAction = null;
+        state.activeSkillName = null;
+        state.selectedTargetId = null;
+        state.selectedAllyId = null;
+        state.activeUnitId = null;
+        state.extraTurnUnitId = null;
+        state.followUpQueue = [];
+        state.isEnhanced = false;
+        clearPendingEnemyActionTimer();
+        mouse.heldAction = null;
+        mouse.holdStart = 0;
+
+        party.forEach((p) => {
+          initializeSpeedState(p);
+          resetActionValue(p);
+        });
+        enemies.forEach((e) => {
+          initializeSpeedState(e);
+          resetActionValue(e);
+        });
 
         EventBus.emit("onBattleStart", { party, enemies });
 
@@ -133,8 +159,39 @@ export function initEngine() {
     },
 
     // Called when player performs an action
-    (actionName, attackerData) => {
+    (actionName, attackerData, options = {}) => {
+      const isInterruptUltimate =
+        options.interruptUltimate &&
+        actionName === "ULTIMATE" &&
+        (state.current !== STATES.PLAYER_TURN ||
+          attackerData.id !== state.activeUnitId);
+      const isResolvingExtraTurnAction =
+        state.extraTurnUnitId === attackerData.id && actionName !== "ULTIMATE";
+
+      if (options.interruptUltimate) {
+        clearPendingEnemyActionTimer();
+      }
+
       executeCombatSequence(actionName, attackerData).then(() => {
+        if (checkWinLossState() !== "CONTINUE") {
+          state.extraTurnUnitId = null;
+          return;
+        }
+
+        if (isInterruptUltimate) {
+          state.current = STATES.PLAYER_TURN;
+          state.activeUnitId = attackerData.id;
+          state.extraTurnUnitId = attackerData.id;
+          state.pendingAction = null;
+          state.selectedTargetId = null;
+          state.selectedAllyId = attackerData.id;
+          return;
+        }
+
+        if (isResolvingExtraTurnAction) {
+          state.extraTurnUnitId = null;
+        }
+
         // Reset turn and continue flow
         state.current = null;
         processGameFlow();

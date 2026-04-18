@@ -1,6 +1,7 @@
 import { STATES, state } from "../core/state.js";
 import { party } from "../data/characters/index.js";
 import { enemies } from "../data/enemies/index.js";
+import { advanceTimeByAv, syncActionValue } from "../utils/speed.js";
 
 export function advanceTimeline() {
   const aliveEnemies = enemies.filter((e) => e.hp > 0);
@@ -8,6 +9,8 @@ export function advanceTimeline() {
   const allUnits = [...aliveParty, ...aliveEnemies];
 
   if (allUnits.length === 0) return null;
+
+  allUnits.forEach((u) => syncActionValue(u));
 
   // Sort by lowest Action Value
   allUnits.sort((a, b) => a.av - b.av);
@@ -17,7 +20,7 @@ export function advanceTimeline() {
 
   // Subtract elapsed time from everyone's AV
   allUnits.forEach((u) => {
-    u.av = Math.max(0, u.av - timeToPass);
+    advanceTimeByAv(u, timeToPass);
   });
 
   state.activeUnitId = nextUnit.id;
@@ -25,6 +28,7 @@ export function advanceTimeline() {
   // Set game state based on who reached 0 AV
   if (aliveParty.some((p) => p.id === nextUnit.id)) {
     state.current = STATES.PLAYER_TURN;
+    state.selectedAllyId = nextUnit.id;
   } else {
     state.current = STATES.ENEMY_TURN;
   }

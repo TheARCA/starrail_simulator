@@ -29,10 +29,26 @@ import {
   drawUI,
   drawActiveSkillBanner,
   drawTotalDamage,
-} from "./ui_combat.js";
+} from "./ui.js";
 
 const imageCache = {};
 // Removed the PLACEHOLDER_SRC constant completely!
+
+function getPendingMoveData(activeChar) {
+  if (!activeChar || !state.pendingAction) return null;
+
+  const logic = activeChar.combatLogic;
+  if (state.isEnhanced) {
+    return state.pendingAction === "ATTACK"
+      ? logic.ultimate.modes.blowoutBasic
+      : logic.ultimate.modes.blowoutSkill;
+  }
+
+  if (state.pendingAction === "ATTACK") return logic.basic;
+  if (state.pendingAction === "SKILL") return logic.skill;
+  if (state.pendingAction === "ULTIMATE") return logic.ultimate;
+  return null;
+}
 
 function getEntityImage(entity, isEnemy) {
   if (imageCache[entity.id]) return imageCache[entity.id];
@@ -44,7 +60,7 @@ function getEntityImage(entity, isEnemy) {
   // This turns "e_baryon_1776105780056_605" back into "e_baryon"
   const baseImageId = entity.id.replace(/_\d+_\d+$/, "");
 
-  // Put 'webp' first since tb_destruction uses it!
+  // Put 'webp' first since trailblazer_destruction uses it!
   const extensions = ["webp", "png", "jpg", "jpeg"];
   let currentExtIndex = 0;
 
@@ -87,6 +103,19 @@ function calculateXPosition(index, totalCards, cardSize, screenWidth) {
 function drawBackground() {
   ctx.fillStyle = NIER_BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const bgGrad = ctx.createRadialGradient(
+    GAME_WIDTH * 0.5,
+    GAME_HEIGHT * 0.35,
+    80,
+    GAME_WIDTH * 0.5,
+    GAME_HEIGHT * 0.35,
+    GAME_HEIGHT * 0.75,
+  );
+  bgGrad.addColorStop(0, "rgba(215, 207, 184, 0.28)");
+  bgGrad.addColorStop(1, "rgba(71, 68, 59, 0)");
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
   const timeOffset = (performance.now() / 40) % 120;
   ctx.beginPath();
   for (let i = -120; i < GAME_HEIGHT; i += 120) {
@@ -98,6 +127,21 @@ function drawBackground() {
     ctx.lineTo(i, GAME_HEIGHT);
   }
   strokeWithCA("rgba(71, 68, 59, 0.15)", 1);
+
+  ctx.fillStyle = "rgba(71, 68, 59, 0.045)";
+  ctx.fillRect(180, 0, 1, GAME_HEIGHT);
+  ctx.fillRect(GAME_WIDTH - 180, 0, 1, GAME_HEIGHT);
+
+  ctx.font = "700 12px 'NewRodin', sans-serif";
+  ctx.textAlign = "left";
+  drawTextWithCA("SECTOR // FRONTLINE", 72, 48, "rgba(71, 68, 59, 0.55)");
+  ctx.textAlign = "right";
+  drawTextWithCA(
+    `FRAME ${Math.floor(performance.now() / 16).toString().padStart(5, "0")}`,
+    GAME_WIDTH - 72,
+    48,
+    "rgba(71, 68, 59, 0.45)",
+  );
 
   if (state.isAnimating) {
     ctx.beginPath();
@@ -147,6 +191,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   entity.displayHp += (entity.hp - entity.displayHp) * 0.25;
   entity.catchupHp += (entity.displayHp - entity.catchupHp) * 0.05;
   entity.displayEnergy += ((entity.energy || 0) - entity.displayEnergy) * 0.2;
+  entity.shieldFlash = Math.max(0, (entity.shieldFlash || 0) - 0.04);
   entity.flash = Math.max(0, entity.flash - 0.05);
 
   const time = performance.now();
@@ -166,58 +211,58 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     mouse.x < x + cardWidth &&
     mouse.y > y &&
     mouse.y < y + cardHeight;
-  let isTargeted =
-    isEnemy &&
-    state.selectedTargetId === entity.id &&
+  const activeChar = party.find((p) => p.id === state.activeUnitId) || party[0];
+  const pendingMove = getPendingMoveData(activeChar);
+  const isSupportTargeting = pendingMove?.targetType === "Ally";
+  const isPlayerActionPreview =
     state.current === STATES.PLAYER_TURN &&
-    !state.isAnimating;
+    !state.isAnimating &&
+    !!pendingMove;
+  const canTargetEnemies = isPlayerActionPreview && !isSupportTargeting;
+  const canTargetAllies = isPlayerActionPreview && isSupportTargeting;
+  const isTargetableSide = !isPlayerActionPreview
+    ? true
+    : isEnemy
+      ? canTargetEnemies
+      : canTargetAllies || state.activeUnitId === entity.id;
+  const hasInteractiveHover = isHovered && isTargetableSide;
+  const isCurrentTurnUnit =
+    state.activeUnitId === entity.id &&
+    (state.current === STATES.PLAYER_TURN ||
+      state.current === STATES.ENEMY_TURN);
+  let isTargeted =
+    state.current === STATES.PLAYER_TURN &&
+    !state.isAnimating &&
+    ((isEnemy && !isSupportTargeting && state.selectedTargetId === entity.id) ||
+      (!isEnemy && isSupportTargeting && state.selectedAllyId === entity.id));
   let isAdjacent = false;
 
   if (
     isEnemy &&
-    state.pendingAction &&
+    pendingMove &&
     state.current === STATES.PLAYER_TURN &&
     !state.isAnimating
   ) {
-    const activeChar =
-      party.find((p) => p.id === state.activeUnitId) || party[0];
-    if (activeChar) {
-      const logic = activeChar.combatLogic;
-      let moveData = state.isEnhanced
-        ? state.pendingAction === "ATTACK"
-          ? logic.ultimate.modes.blowoutBasic
-          : logic.ultimate.modes.blowoutSkill
-        : state.pendingAction === "ATTACK"
-          ? logic.basic
-          : state.pendingAction === "SKILL"
-            ? logic.skill
-            : logic.ultimate;
-
-      if (moveData && moveData.tag === "Blast") {
-        const aliveEnemies = enemies.filter(
-          (e) => e.hp > 0 || (e.scale !== undefined && e.scale >= 0.05),
-        );
-        const tIdx = aliveEnemies.findIndex(
-          (e) => e.id === state.selectedTargetId,
-        );
-        const myIdx = aliveEnemies.findIndex((e) => e.id === entity.id);
-        if (myIdx === tIdx - 1 || myIdx === tIdx + 1) isAdjacent = true;
-      }
+    if (pendingMove.tag === "Blast") {
+      const aliveEnemies = enemies.filter(
+        (e) => e.hp > 0 || (e.scale !== undefined && e.scale >= 0.05),
+      );
+      const tIdx = aliveEnemies.findIndex((e) => e.id === state.selectedTargetId);
+      const myIdx = aliveEnemies.findIndex((e) => e.id === entity.id);
+      if (myIdx === tIdx - 1 || myIdx === tIdx + 1) isAdjacent = true;
     }
   }
 
   const isDimmed =
-    state.current === STATES.PLAYER_TURN &&
-    isEnemy &&
-    !isTargeted &&
-    !isAdjacent &&
-    state.pendingAction;
+    isPlayerActionPreview &&
+    !isTargetableSide &&
+    !isCurrentTurnUnit;
 
   // === NEW JUICE: INTERACTIVE HOVER TILT ===
   if (entity.hp > 0) {
     // THE FIX: The entire hover engine goes to sleep during attack animations
     if (!state.isAnimating) {
-      if (isHovered) {
+      if (hasInteractiveHover) {
         // 1. Pop the card forward slightly
         entity.targetScale = 1.06;
 
@@ -239,6 +284,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   ctx.save();
   if (isDimmed) ctx.globalAlpha = 0.3;
   if (entity.hp <= 0) ctx.globalAlpha = Math.max(0, entity.scale);
+  const cardAlpha = ctx.globalAlpha;
 
   ctx.translate(centerX, centerY);
   ctx.scale(entity.scale, entity.scale);
@@ -252,9 +298,28 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   ctx.fill();
   clearShadow();
 
+  if (isCurrentTurnUnit && entity.hp > 0) {
+    const pulse = 0.45 + Math.abs(Math.sin(time / 160)) * 0.4;
+
+    ctx.fillStyle = `rgba(215, 207, 184, ${0.08 + pulse * 0.12})`;
+    drawChamferedRect(x - 6, y - 6, cardWidth + 12, cardHeight + 12, 16);
+    ctx.fill();
+
+    strokeWithCA(`rgba(71, 68, 59, ${0.75 + pulse * 0.2})`, 4);
+
+    ctx.fillStyle = NIER_DARK;
+    drawChamferedRect(x + 18, y - 26, cardWidth - 36, 18, 6);
+    ctx.fill();
+
+    ctx.font = "800 10px 'NewRodin', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    drawTextWithCA("CURRENT TURN", x + cardWidth / 2, y - 16, NIER_LIGHT);
+  }
+
   // --- 2. TARGET CHEVRONS ---
   if (
-    (isHovered || isTargeted || isAdjacent) &&
+    (hasInteractiveHover || isTargeted || isAdjacent) &&
     entity.hp > 0 &&
     !state.isAnimating
   ) {
@@ -286,12 +351,20 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
   // --- 3. BORDER STROKE ---
   let cardStrokeColor = isTargeted
     ? NIER_DARK
+    : isCurrentTurnUnit
+      ? "rgba(71, 68, 59, 0.9)"
     : isAdjacent
       ? "rgba(71, 68, 59, 0.6)"
-      : isHovered
+      : hasInteractiveHover
         ? "rgba(71, 68, 59, 0.5)"
         : "rgba(71, 68, 59, 0.3)";
-  let cardStrokeWidth = isTargeted ? 3 : isAdjacent || isHovered ? 2 : 1;
+  let cardStrokeWidth = isTargeted
+    ? 3
+    : isCurrentTurnUnit
+      ? 4
+      : isAdjacent || hasInteractiveHover
+        ? 2
+        : 1;
   strokeWithCA(cardStrokeColor, cardStrokeWidth);
 
   // --- 4. PORTRAIT ---
@@ -332,7 +405,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
 
       // Draw Red Shifted left
       ctx.drawImage(portraitImg, px - split, py, pw, ph);
-      // Draw Cyan Shifted right
+      // Draw the offset light pass shifted right
       ctx.drawImage(portraitImg, px + split, py, pw, ph);
 
       ctx.restore();
@@ -340,7 +413,7 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     // ==========================================
 
     // Draw standard portrait image over top
-    ctx.globalAlpha = 0.95;
+    ctx.globalAlpha = cardAlpha * 0.95;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(portraitImg, px, py, pw, ph);
@@ -545,28 +618,6 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     ctx.fillStyle = NIER_DARK;
     ctx.fillRect(barX, hpY, barW * hpPct, 6);
 
-    // --- 8. SIDE-DOCKED DEBUFFS ---
-    if (entity.debuffs && entity.debuffs.length > 0) {
-      entity.debuffs.forEach((d, i) => {
-        const dy = y + 20 + i * 18;
-        const dx = x + cardWidth + 4;
-
-        const label = `${d.name} ${d.duration}`;
-        ctx.font = "800 10px 'NewRodin', sans-serif";
-        const textW = ctx.measureText(label).width;
-
-        ctx.fillStyle = "rgba(215, 207, 184, 0.95)";
-        ctx.fillRect(dx, dy, textW + 12, 14);
-
-        ctx.fillStyle = NIER_DARK;
-        ctx.fillRect(dx, dy, 2, 14);
-
-        ctx.fillStyle = NIER_DARK;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(label, dx + 6, dy + 7);
-      });
-    }
   } else {
     // Player HP Bar
     let hpY = bannerY + 28;
@@ -582,6 +633,29 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     // Fill Current HP
     ctx.fillStyle = NIER_DARK;
     ctx.fillRect(barX, hpY, barW * hpPct, 8);
+
+    if (entity.shield) {
+      const shieldValue = Math.max(0, entity.shield.value || 0);
+      const shieldMax = Math.max(1, entity.shield.maxValue || shieldValue || 1);
+      const shieldPct = Math.max(0, Math.min(1, shieldValue / shieldMax));
+      const shieldPulse =
+        0.35 +
+        Math.abs(Math.sin(performance.now() / 180)) * 0.25 +
+        (entity.shieldFlash || 0) * 0.35;
+
+      ctx.fillStyle = `rgba(215, 207, 184, ${0.18 + shieldPulse * 0.16})`;
+      ctx.fillRect(barX, hpY - 2, barW, 12);
+
+      ctx.fillStyle = `rgba(71, 68, 59, ${0.35 + shieldPulse * 0.25})`;
+      ctx.fillRect(barX, hpY, barW * shieldPct, 8);
+
+      ctx.fillStyle = `rgba(215, 207, 184, ${0.35 + shieldPulse * 0.25})`;
+      ctx.fillRect(barX, hpY, barW * shieldPct, 2);
+
+      ctx.strokeStyle = `rgba(71, 68, 59, ${0.45 + shieldPulse * 0.25})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(barX - 1, hpY - 1, barW + 2, 10);
+    }
 
     // Player Energy Bar
     let enY = hpY + 12;
@@ -614,6 +688,67 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
     );
   }
 
+  if (entity.debuffs && entity.debuffs.length > 0) {
+    entity.debuffs.forEach((d, i) => {
+      const dy = y + 20 + i * 18;
+      const dx = x + cardWidth + 4;
+      const label = `${d.name} ${d.duration}`;
+
+      ctx.font = "800 10px 'NewRodin', sans-serif";
+      const textW = ctx.measureText(label).width;
+
+      ctx.fillStyle = "rgba(215, 207, 184, 0.95)";
+      ctx.fillRect(dx, dy, textW + 12, 14);
+
+      ctx.fillStyle = NIER_DARK;
+      ctx.fillRect(dx, dy, 2, 14);
+
+      ctx.fillStyle = NIER_DARK;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, dx + 6, dy + 7);
+    });
+  }
+
+  if (!isEnemy && entity.statusBadges && entity.statusBadges.length > 0) {
+    entity.statusBadges.slice(0, 2).forEach((badge, index) => {
+      const indicatorW = 64;
+      const indicatorH = 18;
+      const indicatorX = x + cardWidth - indicatorW - 8;
+      const indicatorY = y + 8 + index * 22;
+      const pipCount = badge.maxValue || 0;
+      const pipGap = 3;
+      const pipW = 8;
+      const pipH = 5;
+      const pipsTotalW =
+        pipCount > 0 ? pipCount * pipW + (pipCount - 1) * pipGap : 0;
+      const pipsX = indicatorX + indicatorW - pipsTotalW - 6;
+      const pipsY = indicatorY + 6;
+
+      ctx.fillStyle = "rgba(71, 68, 59, 0.9)";
+      drawChamferedRect(indicatorX, indicatorY, indicatorW, indicatorH, 4);
+      ctx.fill();
+      strokeWithCA("rgba(215, 207, 184, 0.28)", 1);
+
+      ctx.font = "800 8px 'NewRodin', sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      drawTextWithCA(
+        badge.shortLabel || badge.name,
+        indicatorX + 6,
+        indicatorY + indicatorH / 2 + 1,
+        NIER_LIGHT,
+      );
+
+      for (let i = 0; i < pipCount; i++) {
+        ctx.fillStyle =
+          i < (badge.displayValue || 0) ? NIER_LIGHT : "rgba(215, 207, 184, 0.22)";
+        drawChamferedRect(pipsX + i * (pipW + pipGap), pipsY, pipW, pipH, 2);
+        ctx.fill();
+      }
+    });
+  }
+
   if (entity.flash > 0) {
     ctx.fillStyle = `rgba(255, 255, 255, ${entity.flash})`;
     drawChamferedRect(x, y, cardWidth, cardHeight, 15);
@@ -624,6 +759,37 @@ function drawCard(entity, base_x, base_y, isEnemy = false) {
 }
 
 function drawJuice() {
+  for (let i = 0; i < state.fx.slashes.length; i++) {
+    let slash = state.fx.slashes[i];
+    if (!slash || slash.life <= 0) continue;
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, slash.life * 0.7);
+    ctx.translate(slash.x, slash.y);
+    ctx.rotate(slash.angle);
+
+    const grad = ctx.createLinearGradient(
+      -slash.length / 2,
+      0,
+      slash.length / 2,
+      0,
+    );
+    grad.addColorStop(0, "rgba(215, 207, 184, 0)");
+    grad.addColorStop(0.2, slash.color);
+    grad.addColorStop(0.8, slash.color);
+    grad.addColorStop(1, "rgba(215, 207, 184, 0)");
+
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(-slash.length / 2, 0);
+    ctx.lineTo(-slash.length / 2 + 18, -slash.width / 2);
+    ctx.lineTo(slash.length / 2, -slash.width / 6);
+    ctx.lineTo(slash.length / 2 - 20, slash.width / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   for (let i = 0; i < state.fx.shockwaves.length; i++) {
     let sw = state.fx.shockwaves[i];
     if (sw.life <= 0) continue; // Skip dead ring buffer slots
@@ -765,72 +931,82 @@ function render() {
       const activeChar =
         visibleParty.find((p) => p.id === state.activeUnitId) ||
         visibleParty[0];
-      const targetEnemy = visibleEnemies.find(
-        (e) => e.id === state.selectedTargetId,
-      );
+      const moveData = getPendingMoveData(activeChar);
 
-      if (activeChar.renderX && targetEnemy && targetEnemy.renderX) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(
-          activeChar.renderX + CARD_SIZE / 2 + (activeChar.offsetX || 0),
-          activeChar.renderY + (activeChar.offsetY || 0),
-        );
-        ctx.lineTo(
-          targetEnemy.renderX + CARD_SIZE / 2 + (targetEnemy.offsetX || 0),
-          targetEnemy.renderY + CARD_SIZE + 60, // UPDATED to 60
-        );
-
-        // --- JUICE: High-Contrast Main Target Line ---
-        ctx.setLineDash([15, 12]); // Tighter, more aggressive dashes
-        ctx.lineDashOffset = -(performance.now() / 20);
-
-        // 1. Draw a thick dark outer stroke
-        strokeWithCA("rgba(71, 68, 59, 0.85)", 5);
-        // 2. Draw a bright inner core stroke
-        strokeWithCA("rgba(215, 207, 184, 0.95)", 2);
-
-        ctx.restore();
-
-        const logic = activeChar.combatLogic;
-        let moveData = state.isEnhanced
-          ? state.pendingAction === "ATTACK"
-            ? logic.ultimate.modes.blowoutBasic
-            : logic.ultimate.modes.blowoutSkill
-          : state.pendingAction === "ATTACK"
-            ? logic.basic
-            : state.pendingAction === "SKILL"
-              ? logic.skill
-              : logic.ultimate;
-
-        if (moveData && moveData.tag === "Blast") {
-          const tIdx = visibleEnemies.findIndex(
-            (e) => e.id === state.selectedTargetId,
+      if (activeChar.renderX && moveData?.tag === "AoE") {
+        visibleEnemies.forEach((enemy, index) => {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(
+            activeChar.renderX + CARD_SIZE / 2 + (activeChar.offsetX || 0),
+            activeChar.renderY + (activeChar.offsetY || 0),
           );
-          const adjacents = [];
-          if (tIdx > 0) adjacents.push(visibleEnemies[tIdx - 1]);
-          if (tIdx < visibleEnemies.length - 1)
-            adjacents.push(visibleEnemies[tIdx + 1]);
+          ctx.lineTo(
+            enemy.renderX + CARD_SIZE / 2 + (enemy.offsetX || 0),
+            enemy.renderY + CARD_SIZE + 60,
+          );
+          ctx.setLineDash([10, 14]);
+          ctx.lineDashOffset = -(performance.now() / 30) - index * 6;
+          strokeWithCA("rgba(71, 68, 59, 0.6)", 3);
+          ctx.restore();
+        });
+      } else {
+        const targetEnemy = visibleEnemies.find(
+          (e) => e.id === state.selectedTargetId,
+        );
 
-          adjacents.forEach((adj) => {
-            ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(
-              activeChar.renderX + CARD_SIZE / 2 + (activeChar.offsetX || 0),
-              activeChar.renderY + (activeChar.offsetY || 0),
+        if (activeChar.renderX && targetEnemy && targetEnemy.renderX) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(
+            activeChar.renderX + CARD_SIZE / 2 + (activeChar.offsetX || 0),
+            activeChar.renderY + (activeChar.offsetY || 0),
+          );
+          ctx.lineTo(
+            targetEnemy.renderX + CARD_SIZE / 2 + (targetEnemy.offsetX || 0),
+            targetEnemy.renderY + CARD_SIZE + 60, // UPDATED to 60
+          );
+
+          // --- JUICE: High-Contrast Main Target Line ---
+          ctx.setLineDash([15, 12]); // Tighter, more aggressive dashes
+          ctx.lineDashOffset = -(performance.now() / 20);
+
+          // 1. Draw a thick dark outer stroke
+          strokeWithCA("rgba(71, 68, 59, 0.85)", 5);
+          // 2. Draw a bright inner core stroke
+          strokeWithCA("rgba(215, 207, 184, 0.95)", 2);
+
+          ctx.restore();
+
+          if (moveData && moveData.tag === "Blast") {
+            const tIdx = visibleEnemies.findIndex(
+              (e) => e.id === state.selectedTargetId,
             );
-            ctx.lineTo(
-              adj.renderX + CARD_SIZE / 2 + (adj.offsetX || 0),
-              adj.renderY + CARD_SIZE + 60, // UPDATED to 60
-            );
+            const adjacents = [];
+            if (tIdx > 0) adjacents.push(visibleEnemies[tIdx - 1]);
+            if (tIdx < visibleEnemies.length - 1)
+              adjacents.push(visibleEnemies[tIdx + 1]);
 
-            // --- JUICE: Stronger Adjacent Target Lines ---
-            ctx.setLineDash([8, 16]);
-            ctx.lineDashOffset = -(performance.now() / 30);
-            strokeWithCA("rgba(71, 68, 59, 0.6)", 3); // Thicker and darker
+            adjacents.forEach((adj) => {
+              ctx.save();
+              ctx.beginPath();
+              ctx.moveTo(
+                activeChar.renderX + CARD_SIZE / 2 + (activeChar.offsetX || 0),
+                activeChar.renderY + (activeChar.offsetY || 0),
+              );
+              ctx.lineTo(
+                adj.renderX + CARD_SIZE / 2 + (adj.offsetX || 0),
+                adj.renderY + CARD_SIZE + 60, // UPDATED to 60
+              );
 
-            ctx.restore();
-          });
+              // --- JUICE: Stronger Adjacent Target Lines ---
+              ctx.setLineDash([8, 16]);
+              ctx.lineDashOffset = -(performance.now() / 30);
+              strokeWithCA("rgba(71, 68, 59, 0.6)", 3); // Thicker and darker
+
+              ctx.restore();
+            });
+          }
         }
       }
     }

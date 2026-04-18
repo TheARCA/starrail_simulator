@@ -24,12 +24,32 @@ import {
   getWrappedText,
   drawChamferedRect,
 } from "./graphics.js";
+import { getCurrentActionValue, getEffectiveSpd, syncActionValue } from "../utils/speed.js";
 import { analyser, dataArray } from "../core/audio_manager.js";
 
 // Exported so input.js can reuse them!
 export function isInside(x, y, rect) {
   return x > rect.x && x < rect.x + rect.w && y > rect.y && y < rect.y + rect.h;
 }
+
+function compactLabel(text, maxLength) {
+  if (!text) return "NONE";
+  const normalized = text.toUpperCase();
+  return normalized.length > maxLength
+    ? `${normalized.substring(0, maxLength - 1)}.`
+    : normalized;
+}
+
+function drawFittedLine(text, x, y, maxWidth, initialFontSize, fontWeight, color) {
+  let fontSize = initialFontSize;
+  while (fontSize > 8) {
+    ctx.font = `${fontWeight} ${fontSize}px 'NewRodin', sans-serif`;
+    if (ctx.measureText(text).width <= maxWidth) break;
+    fontSize -= 1;
+  }
+  drawTextWithCA(text, x, y, color);
+}
+
 export function getMenuRect(index, total, startY) {
   const w = 240;
   const h = 70;
@@ -39,17 +59,125 @@ export function getMenuRect(index, total, startY) {
   return { x: startX + index * (w + spacing), y: startY, w, h };
 }
 
+function drawTechPanel(x, y, w, h, label, meta = null) {
+  ctx.save();
+  applyHardShadow();
+  ctx.fillStyle = "rgba(215, 207, 184, 0.92)";
+  drawChamferedRect(x, y, w, h, 14);
+  ctx.fill();
+  clearShadow();
+
+  strokeWithCA("rgba(71, 68, 59, 0.28)", 1);
+
+  ctx.save();
+  ctx.beginPath();
+  drawChamferedRect(x, y, w, h, 14);
+  ctx.clip();
+  ctx.fillStyle = "rgba(71, 68, 59, 0.05)";
+  for (let i = 0; i < h; i += 8) {
+    ctx.fillRect(x, y + i, w, 1);
+  }
+  ctx.restore();
+
+  ctx.fillStyle = NIER_DARK;
+  drawChamferedRect(x + 18, y - 10, Math.min(180, w - 36), 20, 5);
+  ctx.fill();
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = "800 10px 'NewRodin', sans-serif";
+  drawTextWithCA(label.toUpperCase(), x + 30, y + 1, NIER_LIGHT);
+
+  if (meta) {
+    ctx.textAlign = "right";
+    ctx.font = "700 10px 'NewRodin', sans-serif";
+    drawTextWithCA(meta.toUpperCase(), x + w - 20, y + 16, "rgba(71, 68, 59, 0.58)");
+  }
+  ctx.restore();
+}
+
+function layoutBattleHud() {
+  const buttonWidth = 250;
+  const buttonHeight = 58;
+  const buttonGap = 26;
+  const totalWidth = buttonWidth * 3 + buttonGap * 2;
+  const startX = UI_PANEL.x + (UI_PANEL.w - totalWidth) / 2;
+  const buttonY = UI_PANEL.y + UI_PANEL.h - buttonHeight - 18;
+
+  btnAttack.x = startX;
+  btnAttack.y = buttonY;
+  btnAttack.w = buttonWidth;
+  btnAttack.h = buttonHeight;
+
+  btnSkill.x = startX + buttonWidth + buttonGap;
+  btnSkill.y = buttonY;
+  btnSkill.w = buttonWidth;
+  btnSkill.h = buttonHeight;
+
+  btnUltimate.x = startX + (buttonWidth + buttonGap) * 2;
+  btnUltimate.y = buttonY;
+  btnUltimate.w = buttonWidth;
+  btnUltimate.h = buttonHeight;
+}
+
 export function drawMainMenu() {
+  const titlePanelX = 300;
+  const titlePanelY = 58;
+  const titlePanelW = GAME_WIDTH - 600;
+  const titlePanelH = 96;
+  drawTechPanel(titlePanelX, titlePanelY, titlePanelW, titlePanelH, "SYSTEM MENU", "SIMULATION LOBBY");
+
+  if (DATABASE_HEROES.length > 0) {
+    const firstHero = getMenuRect(0, DATABASE_HEROES.length, 300);
+    const lastHero = getMenuRect(
+      DATABASE_HEROES.length - 1,
+      DATABASE_HEROES.length,
+      300,
+    );
+    drawTechPanel(
+      firstHero.x - 30,
+      282,
+      lastHero.x + lastHero.w - firstHero.x + 60,
+      98,
+      "Squad Assembly",
+      `${party.length}/4 READY`,
+    );
+  }
+
+  if (DATABASE_ENEMIES.length > 0) {
+    const firstEnemy = getMenuRect(0, DATABASE_ENEMIES.length, 520);
+    const lastEnemy = getMenuRect(
+      DATABASE_ENEMIES.length - 1,
+      DATABASE_ENEMIES.length,
+      520,
+    );
+    drawTechPanel(
+      firstEnemy.x - 30,
+      502,
+      lastEnemy.x + lastEnemy.w - firstEnemy.x + 60,
+      98,
+      "Target Simulation",
+      `${enemies.length}/5 LOADED`,
+    );
+  }
+
   ctx.font = "300 48px 'NewRodin', sans-serif";
   ctx.textAlign = "center";
   ctx.letterSpacing = "4px";
   drawTextWithCA(
     "HONKAI: STAR RAIL - 2D REIMAGINED",
     GAME_WIDTH / 2,
-    140,
+    110,
     NIER_DARK,
   );
   ctx.letterSpacing = "0px";
+  ctx.font = "700 12px 'NewRodin', sans-serif";
+  drawTextWithCA(
+    "SELECT A SQUAD PROFILE, LOAD HOSTILES, THEN INITIALIZE THE ENCOUNTER.",
+    GAME_WIDTH / 2,
+    138,
+    "rgba(71, 68, 59, 0.68)",
+  );
   ctx.font = "600 20px 'NewRodin', sans-serif";
   drawTextWithCA(
     `SELECT SQUAD [ ${party.length} / 4 ]`,
@@ -113,6 +241,15 @@ export function drawMainMenu() {
     );
     ctx.restore();
   }
+
+  ctx.font = "800 11px 'NewRodin', sans-serif";
+  ctx.textAlign = "center";
+  drawTextWithCA(
+    "LMB // TOGGLE UNITS    CLEAR // RESET TARGET LIST    INITIALIZE COMBAT // ENTER BATTLE",
+    GAME_WIDTH / 2,
+    GAME_HEIGHT - 54,
+    "rgba(71, 68, 59, 0.58)",
+  );
 }
 
 function drawMenuToggle(rect, text, isSelected) {
@@ -216,7 +353,8 @@ export function drawActionBar() {
   const aliveParty = party.filter((p) => p.hp > 0);
   let allUnits = [...aliveParty, ...aliveEnemies];
   if (allUnits.length === 0) return;
-  allUnits.sort((a, b) => (a.av || 0) - (b.av || 0));
+  allUnits.forEach((u) => syncActionValue(u));
+  allUnits.sort((a, b) => getCurrentActionValue(a) - getCurrentActionValue(b));
 
   const startX = 60; // Pushed right to make room for the spine
   const startY = 100;
@@ -243,7 +381,7 @@ export function drawActionBar() {
   allUnits.forEach((u, i) => {
     if (i > 7) return;
     const isPlayer = aliveParty.some((p) => p.id === u.id);
-    const isActive = i === 0 && !state.isAnimating;
+    const isActive = state.activeUnitId === u.id;
     const xOffset = isActive ? 15 : 0;
     const yPos = startY + i * 55;
 
@@ -302,34 +440,109 @@ export function drawActionBar() {
 
     ctx.font = "400 12px 'NewRodin', sans-serif";
     drawTextWithCA(
-      `AV: ${Math.ceil(u.av || 0)}`,
+      `AV: ${Math.ceil(getCurrentActionValue(u))}`,
       startX + xOffset + 48,
       yPos + 34,
       "rgba(71, 68, 59, 0.8)",
     );
+
+    if (isActive) {
+      const pulse = 0.45 + Math.abs(Math.sin(performance.now() / 200)) * 0.35;
+      ctx.fillStyle = `rgba(71, 68, 59, ${0.55 + pulse * 0.3})`;
+      drawChamferedRect(startX + xOffset + 148, yPos + 6, 6, 33, 2);
+      ctx.fill();
+
+      ctx.fillStyle = `rgba(215, 207, 184, ${0.25 + pulse * 0.2})`;
+      ctx.fillRect(startX + xOffset + 140, yPos + 21, 8, 2);
+
+      if (state.followUpQueue && state.followUpQueue.length > 0) {
+        const followUp = state.followUpQueue[0];
+        const chipX = startX + xOffset + 172;
+        const chipY = yPos + 9;
+        const chipW = 76;
+        const chipH = 28;
+
+        ctx.fillStyle = "rgba(71, 68, 59, 0.92)";
+        drawChamferedRect(chipX, chipY, chipW, chipH, 5);
+        ctx.fill();
+        strokeWithCA("rgba(215, 207, 184, 0.45)", 1);
+
+        ctx.font = "800 10px 'NewRodin', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        drawTextWithCA(
+          followUp.label || "FOLLOW",
+          chipX + chipW / 2,
+          chipY + 10,
+          NIER_LIGHT,
+        );
+
+        if (state.followUpQueue.length > 1) {
+          ctx.font = "700 9px 'NewRodin', sans-serif";
+          drawTextWithCA(
+            `x${state.followUpQueue.length}`,
+            chipX + chipW / 2,
+            chipY + 20,
+            "rgba(215, 207, 184, 0.75)",
+          );
+        }
+      }
+    }
   });
   ctx.restore();
 }
 
 function drawSkillPoints() {
+  layoutBattleHud();
+
   const spW = 35;
   const spH = 12;
   const gap = 8;
   const totalW = state.maxSp * spW + (state.maxSp - 1) * gap;
 
-  // Fit perfectly above the right side of the main action panel
-  const startX = UI_PANEL.x + UI_PANEL.w - totalW - 50;
-  const startY = UI_PANEL.y - 25;
+  // Center the SP lane in its own band above the action buttons
+  const startX = UI_PANEL.x + UI_PANEL.w / 2 - totalW / 2;
+  const startY = UI_PANEL.y + 94;
+  const headerCenterX = UI_PANEL.x + UI_PANEL.w / 2;
+  const labelW = 156;
+  const labelH = 20;
+  const countW = 34;
+  const countH = 24;
+  const headerGap = 12;
+  const labelX = headerCenterX - (labelW + headerGap + countW) / 2;
+  const labelY = startY - 28;
+  const countX = labelX + labelW + headerGap;
+  const countY = startY - 30;
 
   ctx.save();
-  ctx.font = "800 16px 'NewRodin', sans-serif";
-  ctx.textAlign = "right";
+  ctx.fillStyle = NIER_DARK;
+  drawChamferedRect(labelX, labelY, labelW, labelH, 5);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(215, 207, 184, 0.92)";
+  drawChamferedRect(countX, countY, countW, countH, 6);
+  ctx.fill();
+  strokeWithCA("rgba(71, 68, 59, 0.35)", 1);
+
+  ctx.fillStyle = "rgba(71, 68, 59, 0.22)";
+  ctx.fillRect(labelX + 12, labelY + labelH + 5, labelW + countW + headerGap - 24, 1);
+
+  ctx.font = "800 11px 'NewRodin', sans-serif";
+  ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   drawTextWithCA(
     "SKILL POINTS",
-    startX - 20,
-    startY + spH / 2 + 1,
-    "rgba(71, 68, 59, 0.8)",
+    labelX + labelW / 2,
+    labelY + labelH / 2 + 1,
+    NIER_LIGHT,
+  );
+
+  ctx.font = "800 14px 'NewRodin', sans-serif";
+  drawTextWithCA(
+    `${state.sp}`,
+    countX + countW / 2,
+    countY + countH / 2 + 1,
+    NIER_DARK,
   );
 
   // --- NEW: DETERMINE PREVIEW STATE ---
@@ -479,6 +692,7 @@ export function drawTotalDamage() {
 
 export function drawUI() {
   ctx.save();
+  layoutBattleHud();
 
   // 1. The Base Shadowed Panel
   applyHardShadow();
@@ -531,6 +745,8 @@ export function drawUI() {
 
     ctx.fillRect(UI_PANEL.x + 40 + i * 6, UI_PANEL.y - 12 - h + 8, 3, h);
   }
+
+  drawCommandReadout();
 
   // --- The Core Buttons ---
   if (state.current === STATES.PLAYER_TURN) {
@@ -589,6 +805,100 @@ export function drawUI() {
   ctx.restore();
 }
 
+function drawCommandReadout() {
+  const activeUnit = party.find((p) => p.id === state.activeUnitId);
+  const targetEnemy = enemies.find((enemy) => enemy.id === state.selectedTargetId);
+  const targetAlly = party.find((hero) => hero.id === state.selectedAllyId);
+
+  const leftPodX = UI_PANEL.x + 26;
+  const leftPodY = UI_PANEL.y + 18;
+  const leftPodW = 332;
+  const leftPodH = 56;
+  const rightPodX = UI_PANEL.x + UI_PANEL.w - 358;
+  const rightPodY = leftPodY;
+  const rightPodW = 332;
+  const rightPodH = 56;
+
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const modeLabel =
+    state.pendingAction === "ATTACK"
+      ? "BASIC"
+      : state.pendingAction === "SKILL"
+        ? "SKILL"
+        : state.pendingAction === "ULTIMATE"
+          ? "ULTIMATE"
+          : "IDLE";
+  const focusLabel =
+    state.pendingAction === "SKILL" && targetAlly
+      ? `ALLY ${compactLabel(targetAlly.name, 8)}`
+      : targetEnemy
+        ? `TARGET ${compactLabel(targetEnemy.name, 8)}`
+        : "TARGET NONE";
+
+  drawTechPanel(leftPodX, leftPodY, leftPodW, leftPodH, "Operator");
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  drawFittedLine(
+    activeUnit ? compactLabel(activeUnit.name, 18) : "NO UNIT",
+    leftPodX + 18,
+    leftPodY + 28,
+    leftPodW - 36,
+    14,
+    800,
+    NIER_DARK,
+  );
+  drawFittedLine(
+    activeUnit
+      ? `${activeUnit.element?.toUpperCase() || "N/A"} | EN ${Math.floor(activeUnit.energy || 0)}/${activeUnit.maxEnergy || 120} | SPD ${Math.floor(getEffectiveSpd(activeUnit))}`
+      : "AWAITING TIMELINE",
+    leftPodX + 18,
+    leftPodY + 45,
+    leftPodW - 36,
+    9,
+    700,
+    "rgba(71, 68, 59, 0.72)",
+  );
+
+  const focusTitle =
+    state.pendingAction === "SKILL" ? "Support Focus" : "Target Focus";
+  const focusName =
+    state.pendingAction === "SKILL" && targetAlly
+      ? compactLabel(targetAlly.name, 20)
+      : targetEnemy
+        ? compactLabel(targetEnemy.name, 20)
+        : "NO LOCK";
+  const focusMeta =
+    state.pendingAction === "SKILL" && targetAlly
+      ? `HP ${Math.floor(targetAlly.hp || 0)}/${targetAlly.baseHp || 0}`
+      : targetEnemy
+        ? `HP ${Math.floor(targetEnemy.hp || 0)}/${targetEnemy.baseHp || 0}`
+        : "SELECT A FOCUS";
+
+  drawTechPanel(rightPodX, rightPodY, rightPodW, rightPodH, focusTitle);
+  ctx.textAlign = "left";
+  drawFittedLine(
+    compactLabel(focusName, 18),
+    rightPodX + 18,
+    rightPodY + 28,
+    rightPodW - 36,
+    14,
+    800,
+    NIER_DARK,
+  );
+  drawFittedLine(
+    `${focusLabel} | ${focusMeta} | ${modeLabel}`,
+    rightPodX + 18,
+    rightPodY + 45,
+    rightPodW - 36,
+    9,
+    700,
+    "rgba(71, 68, 59, 0.72)",
+  );
+  ctx.restore();
+}
+
 export function drawButton(
   btn,
   text,
@@ -597,6 +907,7 @@ export function drawButton(
   isDisabled = false,
   shortcutKey = null, // NEW: Optional shortcut badge
 ) {
+  layoutBattleHud();
   const hovered = isInside(mouse.x, mouse.y, btn) && !isDisabled;
   const isPlayerTurn =
     state.current === STATES.PLAYER_TURN && !state.isAnimating;
@@ -623,6 +934,31 @@ export function drawButton(
     strokeWithCA("rgba(71, 68, 59, 0.4)", 1);
     textColor = NIER_DARK;
   }
+
+  const sweepWidth = btn.w * 0.22;
+  const sweepX =
+    btn.x - sweepWidth + ((performance.now() / 10) % (btn.w + sweepWidth * 2));
+  ctx.save();
+  ctx.beginPath();
+  drawChamferedRect(btn.x, renderY, btn.w, btn.h, 15);
+  ctx.clip();
+  const sweepGrad = ctx.createLinearGradient(
+    sweepX,
+    renderY,
+    sweepX + sweepWidth,
+    renderY,
+  );
+  sweepGrad.addColorStop(0, "rgba(215, 207, 184, 0)");
+  sweepGrad.addColorStop(
+    0.5,
+    (hovered && isActive) || forceActive
+      ? "rgba(215, 207, 184, 0.18)"
+      : "rgba(71, 68, 59, 0.08)",
+  );
+  sweepGrad.addColorStop(1, "rgba(215, 207, 184, 0)");
+  ctx.fillStyle = sweepGrad;
+  ctx.fillRect(sweepX, renderY, sweepWidth, btn.h);
+  ctx.restore();
 
   // --- JUICE: Kinetic Target Brackets ---
   if ((hovered && isActive && !isDisabled && !forceActive) || forceActive) {
@@ -712,6 +1048,9 @@ export function drawActiveSkillBanner() {
   ctx.fill();
   clearShadow();
   strokeWithCA(NIER_LIGHT, 2);
+  ctx.fillStyle = "rgba(215, 207, 184, 0.18)";
+  ctx.fillRect(boxX + 18, boxY + 12, boxW - 36, 2);
+  ctx.fillRect(boxX + 18, boxY + 36, boxW - 36, 2);
   drawTextWithCA(
     state.activeSkillName.toUpperCase(),
     GAME_WIDTH / 2,

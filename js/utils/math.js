@@ -113,7 +113,11 @@ export function calculateDamage(
 ) {
   const attackerLevel = attacker.level || 1;
   const enemyLevel = target.level || 1;
-  const atk = attacker.atk || 0;
+  const atkPct =
+    (attacker.atkPct || 0) +
+    (attacker.talentAtkPct || 0) +
+    (attacker.stats?.atkPct || 0);
+  const atk = (attacker.atk || 0) * (1 + atkPct);
   const element = attacker.element || "Physical";
   const maxToughness = target.baseToughness || target.toughness || 30;
 
