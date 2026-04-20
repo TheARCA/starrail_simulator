@@ -28,8 +28,14 @@ import {
   getWrappedText,
   drawChamferedRect,
 } from "./graphics.js";
-import { getCurrentActionValue, getEffectiveSpd, syncActionValue } from "../utils/speed.js";
+import {
+  getCurrentActionValue,
+  getEffectiveSpd,
+  syncActionValue,
+} from "../utils/speed.js";
 import { analyser, dataArray } from "../core/audio_manager.js";
+
+const menuImageCache = {};
 
 // Exported so input.js can reuse them!
 export function isInside(x, y, rect) {
@@ -44,7 +50,15 @@ function compactLabel(text, maxLength) {
     : normalized;
 }
 
-function drawFittedLine(text, x, y, maxWidth, initialFontSize, fontWeight, color) {
+function drawFittedLine(
+  text,
+  x,
+  y,
+  maxWidth,
+  initialFontSize,
+  fontWeight,
+  color,
+) {
   let fontSize = initialFontSize;
   while (fontSize > 8) {
     ctx.font = `${fontWeight} ${fontSize}px 'NewRodin', sans-serif`;
@@ -52,6 +66,30 @@ function drawFittedLine(text, x, y, maxWidth, initialFontSize, fontWeight, color
     fontSize -= 1;
   }
   drawTextWithCA(text, x, y, color);
+}
+
+function getMenuEntityImage(entity, isEnemy) {
+  if (!entity) return null;
+  if (menuImageCache[entity.id]) return menuImageCache[entity.id];
+
+  const img = new Image();
+  const folder = isEnemy ? "enemies" : "characters";
+  const baseImageId = entity.id.replace(/_\d+_\d+$/, "");
+  const extensions = ["webp", "png", "jpg", "jpeg"];
+  let currentExtIndex = 0;
+
+  img.src = `assets/img/${folder}/${baseImageId}.${extensions[currentExtIndex]}`;
+  img.onerror = () => {
+    currentExtIndex++;
+    if (currentExtIndex < extensions.length) {
+      img.src = `assets/img/${folder}/${baseImageId}.${extensions[currentExtIndex]}`;
+    } else {
+      img.isPlaceholder = true;
+    }
+  };
+
+  menuImageCache[entity.id] = img;
+  return img;
 }
 
 export const HERO_MENU_PAGE_SIZE = 4;
@@ -73,11 +111,23 @@ export function getVisibleHeroEntries() {
     HERO_MENU_PAGE_SIZE,
   );
   const start = state.menu.heroPage * HERO_MENU_PAGE_SIZE;
-  const visibleHeroes = DATABASE_HEROES.slice(start, start + HERO_MENU_PAGE_SIZE);
+  const visibleHeroes = DATABASE_HEROES.slice(
+    start,
+    start + HERO_MENU_PAGE_SIZE,
+  );
   return visibleHeroes.map((hero, index) => ({
     hero,
     absoluteIndex: start + index,
-    rect: getStackedMenuRect(index, visibleHeroes.length, 190, 342, 430, 380, 96, 18),
+    rect: getStackedMenuRect(
+      index,
+      visibleHeroes.length,
+      118,
+      338,
+      468,
+      420,
+      108,
+      22,
+    ),
   }));
 }
 
@@ -88,21 +138,55 @@ export function getVisibleEnemyEntries() {
     ENEMY_MENU_PAGE_SIZE,
   );
   const start = state.menu.enemyPage * ENEMY_MENU_PAGE_SIZE;
-  const visibleEnemies = DATABASE_ENEMIES.slice(start, start + ENEMY_MENU_PAGE_SIZE);
+  const visibleEnemies = DATABASE_ENEMIES.slice(
+    start,
+    start + ENEMY_MENU_PAGE_SIZE,
+  );
   return visibleEnemies.map((enemy, index) => ({
     enemy,
     absoluteIndex: start + index,
     rect: getStackedMenuRect(
       index,
       visibleEnemies.length,
-      GAME_WIDTH - 570,
-      342,
-      430,
-      380,
-      96,
-      18,
+      GAME_WIDTH - 538,
+      338,
+      468,
+      420,
+      108,
+      22,
     ),
   }));
+}
+
+function drawMenuSectionHeading(x, y, w, label, meta, align = "left") {
+  const tabW = 144;
+  const tabX = align === "left" ? x : x + w - tabW;
+  const lineY = y + 26;
+
+  ctx.save();
+  ctx.fillStyle = NIER_DARK;
+  drawChamferedRect(tabX, y, tabW, 22, 6);
+  ctx.fill();
+
+  ctx.textBaseline = "middle";
+  ctx.font = "800 11px 'NewRodin', sans-serif";
+
+  ctx.textAlign = "left";
+  drawTextWithCA(label.toUpperCase(), tabX + 18, y + 11, NIER_LIGHT);
+
+  ctx.fillStyle = "rgba(71, 68, 59, 0.2)";
+  ctx.fillRect(x, lineY, w, 1);
+
+  ctx.font = "700 11px 'NewRodin', sans-serif";
+  ctx.fillStyle = "rgba(71, 68, 59, 0.58)";
+  ctx.textAlign = align === "left" ? "right" : "left";
+  drawTextWithCA(
+    meta.toUpperCase(),
+    align === "left" ? x + w : x,
+    y + 11,
+    "rgba(71, 68, 59, 0.58)",
+  );
+  ctx.restore();
 }
 
 function drawTechPanel(x, y, w, h, label, meta = null) {
@@ -137,7 +221,12 @@ function drawTechPanel(x, y, w, h, label, meta = null) {
   if (meta) {
     ctx.textAlign = "right";
     ctx.font = "700 10px 'NewRodin', sans-serif";
-    drawTextWithCA(meta.toUpperCase(), x + w - 20, y + 16, "rgba(71, 68, 59, 0.58)");
+    drawTextWithCA(
+      meta.toUpperCase(),
+      x + w - 20,
+      y + 16,
+      "rgba(71, 68, 59, 0.58)",
+    );
   }
   ctx.restore();
 }
@@ -169,73 +258,86 @@ function layoutBattleHud() {
 export function drawMainMenu() {
   const visibleHeroes = getVisibleHeroEntries();
   const visibleEnemies = getVisibleEnemyEntries();
-  const deployPanel = { x: 650, y: 270, w: 620, h: 390 };
+  const heroColumn = { x: 118, y: 264, w: 420 };
+  const enemyColumn = { x: GAME_WIDTH - 538, y: 264, w: 420 };
+  const deployPanel = { x: 624, y: 266, w: 672, h: 404 };
   const readiness = {
     squadReady: party.length > 0,
     enemyReady: enemies.length > 0,
   };
-  const heroPages = Math.max(1, Math.ceil(DATABASE_HEROES.length / HERO_MENU_PAGE_SIZE));
-  const enemyPages = Math.max(1, Math.ceil(DATABASE_ENEMIES.length / ENEMY_MENU_PAGE_SIZE));
+  const heroPages = Math.max(
+    1,
+    Math.ceil(DATABASE_HEROES.length / HERO_MENU_PAGE_SIZE),
+  );
+  const enemyPages = Math.max(
+    1,
+    Math.ceil(DATABASE_ENEMIES.length / ENEMY_MENU_PAGE_SIZE),
+  );
 
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = "300 38px 'NewRodin', sans-serif";
+  ctx.font = "300 34px 'NewRodin', sans-serif";
   drawTextWithCA(
     "HONKAI: STAR RAIL - 2D REIMAGINED",
     GAME_WIDTH / 2,
-    108,
+    100,
     NIER_DARK,
   );
-  ctx.font = "700 12px 'NewRodin', sans-serif";
+  ctx.font = "700 11px 'NewRodin', sans-serif";
   drawTextWithCA(
-    "Select a squad. Set a target group. Deploy.",
+    "Assemble a squad. Lock a target group. Open the combat instance.",
     GAME_WIDTH / 2,
-    144,
-    "rgba(71, 68, 59, 0.68)",
+    130,
+    "rgba(71, 68, 59, 0.6)",
   );
-  ctx.fillStyle = "rgba(71, 68, 59, 0.18)";
-  ctx.fillRect(700, 170, 520, 1);
+  ctx.fillStyle = "rgba(71, 68, 59, 0.16)";
+  ctx.fillRect(596, 156, 728, 1);
+  ctx.fillRect(596, 164, 728, 1);
   ctx.restore();
 
-  btnHeroPrev.x = 190;
-  btnHeroPrev.y = 760;
+  btnHeroPrev.x = heroColumn.x;
+  btnHeroPrev.y = 794;
   btnHeroPrev.w = 44;
   btnHeroPrev.h = 44;
-  btnHeroNext.x = 546;
-  btnHeroNext.y = 760;
+  btnHeroNext.x = heroColumn.x + heroColumn.w - 44;
+  btnHeroNext.y = 794;
   btnHeroNext.w = 44;
   btnHeroNext.h = 44;
 
-  btnEnemyPrev.x = GAME_WIDTH - 590;
-  btnEnemyPrev.y = 760;
+  btnEnemyPrev.x = enemyColumn.x;
+  btnEnemyPrev.y = 794;
   btnEnemyPrev.w = 44;
   btnEnemyPrev.h = 44;
-  btnEnemyNext.x = GAME_WIDTH - 234;
-  btnEnemyNext.y = 760;
+  btnEnemyNext.x = enemyColumn.x + enemyColumn.w - 44;
+  btnEnemyNext.y = 794;
   btnEnemyNext.w = 44;
   btnEnemyNext.h = 44;
 
-  ctx.save();
-  ctx.textBaseline = "middle";
-  ctx.font = "800 14px 'NewRodin', sans-serif";
-  ctx.textAlign = "left";
-  drawTextWithCA("ALLIES", 170, 286, NIER_DARK);
-  ctx.font = "700 11px 'NewRodin', sans-serif";
-  drawTextWithCA(`${party.length}/4 READY`, 170, 308, "rgba(71, 68, 59, 0.56)");
-  ctx.fillStyle = "rgba(71, 68, 59, 0.22)";
-  ctx.fillRect(170, 322, 420, 1);
-
-  ctx.textAlign = "right";
-  ctx.font = "800 14px 'NewRodin', sans-serif";
-  drawTextWithCA("ENEMIES", GAME_WIDTH - 170, 286, NIER_DARK);
-  ctx.font = "700 11px 'NewRodin', sans-serif";
-  drawTextWithCA(`${enemies.length}/5 LOADED`, GAME_WIDTH - 170, 308, "rgba(71, 68, 59, 0.56)");
-  ctx.fillRect(GAME_WIDTH - 590, 322, 420, 1);
-  ctx.restore();
+  drawMenuSectionHeading(
+    heroColumn.x,
+    heroColumn.y,
+    heroColumn.w,
+    "Allies",
+    `${party.length}/4 Ready`,
+    "left",
+  );
+  drawMenuSectionHeading(
+    enemyColumn.x,
+    enemyColumn.y,
+    enemyColumn.w,
+    "Enemies",
+    `${enemies.length}/5 Loaded`,
+    "right",
+  );
 
   visibleHeroes.forEach(({ hero, absoluteIndex, rect }) => {
-    drawMenuToggle(rect, hero, party.some((p) => p.id === hero.id), absoluteIndex + 1);
+    drawMenuToggle(
+      rect,
+      hero,
+      party.some((p) => p.id === hero.id),
+      absoluteIndex + 1,
+    );
   });
 
   if (heroPages > 1) {
@@ -244,14 +346,14 @@ export function drawMainMenu() {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "700 11px 'NewRodin', sans-serif";
-    drawTextWithCA(
-      `${state.menu.heroPage + 1}/${heroPages}`,
-      390,
-      782,
-      "rgba(71, 68, 59, 0.56)",
-    );
-    ctx.restore();
+      ctx.font = "700 11px 'NewRodin', sans-serif";
+      drawTextWithCA(
+        `${state.menu.heroPage + 1}/${heroPages}`,
+        heroColumn.x + heroColumn.w / 2,
+        816,
+        "rgba(71, 68, 59, 0.56)",
+      );
+      ctx.restore();
   }
 
   visibleEnemies.forEach(({ enemy, absoluteIndex, rect }) => {
@@ -265,45 +367,81 @@ export function drawMainMenu() {
 
   if (enemyPages > 1) {
     drawMenuPageButton(btnEnemyPrev, "<", state.menu.enemyPage > 0);
-    drawMenuPageButton(btnEnemyNext, ">", state.menu.enemyPage < enemyPages - 1);
+    drawMenuPageButton(
+      btnEnemyNext,
+      ">",
+      state.menu.enemyPage < enemyPages - 1,
+    );
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "700 11px 'NewRodin', sans-serif";
-    drawTextWithCA(
-      `${state.menu.enemyPage + 1}/${enemyPages}`,
-      GAME_WIDTH - 390,
-      782,
-      "rgba(71, 68, 59, 0.56)",
-    );
-    ctx.restore();
-  }
+      ctx.font = "700 11px 'NewRodin', sans-serif";
+      drawTextWithCA(
+        `${state.menu.enemyPage + 1}/${enemyPages}`,
+        enemyColumn.x + enemyColumn.w / 2,
+        816,
+        "rgba(71, 68, 59, 0.56)",
+      );
+      ctx.restore();
+    }
 
-  btnClearEnemies.x = GAME_WIDTH - 386;
-  btnClearEnemies.y = 780;
-  btnClearEnemies.w = 166;
-  btnClearEnemies.h = 40;
-  if (enemies.length > 0) {
-    drawButton(btnClearEnemies, btnClearEnemies.text, false);
-  }
+  btnClearEnemies.x = deployPanel.x + 30;
+  btnClearEnemies.y = deployPanel.y + deployPanel.h - 70;
+  btnClearEnemies.w = 158;
+  btnClearEnemies.h = 34;
 
   ctx.save();
   applyHardShadow();
-  ctx.fillStyle = "rgba(215, 207, 184, 0.9)";
-  drawChamferedRect(deployPanel.x, deployPanel.y, deployPanel.w, deployPanel.h, 18);
+  ctx.fillStyle = "rgba(207, 198, 174, 0.88)";
+  drawChamferedRect(
+    deployPanel.x,
+    deployPanel.y,
+    deployPanel.w,
+    deployPanel.h,
+    18,
+  );
   ctx.fill();
   clearShadow();
-  strokeWithCA("rgba(71, 68, 59, 0.22)", 1);
+  strokeWithCA("rgba(71, 68, 59, 0.24)", 1);
 
   ctx.save();
   ctx.beginPath();
-  drawChamferedRect(deployPanel.x, deployPanel.y, deployPanel.w, deployPanel.h, 18);
+  drawChamferedRect(
+    deployPanel.x,
+    deployPanel.y,
+    deployPanel.w,
+    deployPanel.h,
+    18,
+  );
   ctx.clip();
-  ctx.fillStyle = "rgba(71, 68, 59, 0.04)";
-  for (let i = 0; i < deployPanel.h; i += 10) {
+  const panelGradient = ctx.createLinearGradient(
+    deployPanel.x,
+    deployPanel.y,
+    deployPanel.x + deployPanel.w,
+    deployPanel.y + deployPanel.h,
+  );
+  panelGradient.addColorStop(0, "rgba(220, 211, 188, 0.18)");
+  panelGradient.addColorStop(1, "rgba(71, 68, 59, 0.06)");
+  ctx.fillStyle = panelGradient;
+  ctx.fillRect(deployPanel.x, deployPanel.y, deployPanel.w, deployPanel.h);
+
+  ctx.fillStyle = "rgba(71, 68, 59, 0.035)";
+  for (let i = 0; i < deployPanel.h; i += 8) {
     ctx.fillRect(deployPanel.x, deployPanel.y + i, deployPanel.w, 1);
   }
+  for (let i = 40; i < deployPanel.w; i += 54) {
+    ctx.fillRect(deployPanel.x + i, deployPanel.y + 24, 1, deployPanel.h - 48);
+  }
   ctx.restore();
+
+  strokeWithCA("rgba(71, 68, 59, 0.15)", 1);
+  drawChamferedRect(
+    deployPanel.x + 20,
+    deployPanel.y + 20,
+    deployPanel.w - 40,
+    deployPanel.h - 40,
+    14,
+  );
 
   ctx.fillStyle = NIER_DARK;
   drawChamferedRect(deployPanel.x + 24, deployPanel.y - 12, 160, 20, 5);
@@ -315,163 +453,418 @@ export function drawMainMenu() {
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = "300 52px 'NewRodin', sans-serif";
-  drawTextWithCA("VS", GAME_WIDTH / 2, deployPanel.y + 102, "rgba(71, 68, 59, 0.14)");
-  ctx.font = "800 34px 'NewRodin', sans-serif";
+  ctx.font = "300 64px 'NewRodin', sans-serif";
   drawTextWithCA(
-    readiness.squadReady && readiness.enemyReady ? "BEGIN SIMULATION" : "STANDBY",
+    "VS",
     GAME_WIDTH / 2,
-    deployPanel.y + 170,
+    deployPanel.y + 112,
+    "rgba(71, 68, 59, 0.12)",
+  );
+  ctx.fillStyle = "rgba(71, 68, 59, 0.12)";
+  ctx.fillRect(GAME_WIDTH / 2 - 110, deployPanel.y + 132, 220, 1);
+
+  ctx.font = "800 32px 'NewRodin', sans-serif";
+  drawTextWithCA(
+    readiness.squadReady && readiness.enemyReady
+      ? "COMBAT READY"
+      : "STANDBY",
+    GAME_WIDTH / 2,
+    deployPanel.y + 182,
     NIER_DARK,
   );
   ctx.font = "700 12px 'NewRodin', sans-serif";
   drawTextWithCA(
     readiness.squadReady && readiness.enemyReady
-      ? "Combat instance ready."
-      : "Select at least one ally and one enemy.",
+      ? "Launch the encounter whenever you are ready."
+      : "Lock at least one ally and one enemy to proceed.",
     GAME_WIDTH / 2,
-    deployPanel.y + 202,
+    deployPanel.y + 214,
     "rgba(71, 68, 59, 0.62)",
+  );
+
+  ctx.font = "800 12px 'NewRodin', sans-serif";
+  ctx.textAlign = "left";
+  drawTextWithCA(
+    `${String(party.length).padStart(2, "0")}  ALLIES`,
+    deployPanel.x + 42,
+    deployPanel.y + deployPanel.h - 110,
+    "rgba(71, 68, 59, 0.68)",
+  );
+  ctx.textAlign = "right";
+  drawTextWithCA(
+    `${String(enemies.length).padStart(2, "0")}  HOSTILES`,
+    deployPanel.x + deployPanel.w - 42,
+    deployPanel.y + deployPanel.h - 110,
+    "rgba(71, 68, 59, 0.68)",
   );
   ctx.restore();
 
-  btnStartBattle.x = GAME_WIDTH / 2 - 190;
-  btnStartBattle.y = deployPanel.y + 232;
-  btnStartBattle.w = 380;
-  btnStartBattle.h = 78;
+  btnStartBattle.x = GAME_WIDTH / 2 - 212;
+  btnStartBattle.y = deployPanel.y + deployPanel.h - 128;
+  btnStartBattle.w = 424;
+  btnStartBattle.h = 72;
 
-  if (readiness.squadReady && readiness.enemyReady) {
-    drawButton(btnStartBattle, btnStartBattle.text, true);
-  } else {
+  ctx.save();
+  applyHardShadow();
+  ctx.fillStyle =
+    readiness.squadReady && readiness.enemyReady
+      ? "rgba(71, 68, 59, 0.94)"
+      : "rgba(71, 68, 59, 0.12)";
+  drawChamferedRect(
+    btnStartBattle.x,
+    btnStartBattle.y,
+    btnStartBattle.w,
+    btnStartBattle.h,
+    18,
+  );
+  ctx.fill();
+  clearShadow();
+  strokeWithCA(
+    readiness.squadReady && readiness.enemyReady
+      ? "rgba(215, 207, 184, 0.2)"
+      : "rgba(71, 68, 59, 0.28)",
+    1,
+  );
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = readiness.squadReady && readiness.enemyReady
+    ? "800 24px 'NewRodin', sans-serif"
+    : "400 22px 'NewRodin', sans-serif";
+  drawTextWithCA(
+    readiness.squadReady && readiness.enemyReady
+      ? "BEGIN SIMULATION"
+      : "AWAITING SELECTIONS",
+    btnStartBattle.x + btnStartBattle.w / 2,
+    btnStartBattle.y + btnStartBattle.h / 2 + 1,
+    readiness.squadReady && readiness.enemyReady
+      ? NIER_LIGHT
+      : "rgba(71, 68, 59, 0.52)",
+  );
+  ctx.restore();
+
+  if (enemies.length > 0) {
     ctx.save();
-    ctx.fillStyle = "rgba(71, 68, 59, 0.1)";
+    const hovered = isInside(mouse.x, mouse.y, btnClearEnemies);
+    ctx.fillStyle = hovered
+      ? "rgba(71, 68, 59, 0.9)"
+      : "rgba(71, 68, 59, 0.14)";
     drawChamferedRect(
-      btnStartBattle.x,
-      btnStartBattle.y,
-      btnStartBattle.w,
-      btnStartBattle.h,
-      20,
+      btnClearEnemies.x,
+      btnClearEnemies.y,
+      btnClearEnemies.w,
+      btnClearEnemies.h,
+      8,
     );
     ctx.fill();
-    strokeWithCA("rgba(71, 68, 59, 0.3)", 1);
-    ctx.font = "400 24px 'NewRodin', sans-serif";
+    strokeWithCA(
+      hovered ? "rgba(215, 207, 184, 0.2)" : "rgba(71, 68, 59, 0.22)",
+      1,
+    );
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    ctx.font = "800 11px 'NewRodin', sans-serif";
     drawTextWithCA(
-      "AWAITING SELECTIONS",
-      btnStartBattle.x + btnStartBattle.w / 2,
-      btnStartBattle.y + btnStartBattle.h / 2,
-      "rgba(71, 68, 59, 0.5)",
+      "RESET HOSTILES",
+      btnClearEnemies.x + btnClearEnemies.w / 2,
+      btnClearEnemies.y + btnClearEnemies.h / 2 + 1,
+      hovered ? NIER_LIGHT : NIER_DARK,
     );
     ctx.restore();
   }
 }
 
 function drawMenuToggle(rect, hero, isSelected, slotIndex) {
-  const hovered = isInside(mouse.x, mouse.y, rect);
-  ctx.save();
-  applyHardShadow();
-  ctx.fillStyle = hovered || isSelected ? "rgba(215, 207, 184, 0.96)" : "rgba(215, 207, 184, 0.82)";
-  drawChamferedRect(rect.x, rect.y, rect.w, rect.h, 12);
-  ctx.fill();
-  clearShadow();
-
-  let textColor;
-  if (isSelected) {
-    ctx.fillStyle = NIER_DARK;
-    ctx.fill();
-    textColor = NIER_LIGHT;
-  } else if (hovered) {
-    strokeWithCA("rgba(71, 68, 59, 0.7)", 2);
-    textColor = NIER_DARK;
-  } else {
-    strokeWithCA("rgba(71, 68, 59, 0.22)", 1);
-    textColor = "rgba(71, 68, 59, 0.7)";
-  }
-
-  ctx.fillStyle = isSelected ? NIER_LIGHT : "rgba(71, 68, 59, 0.12)";
-  drawChamferedRect(rect.x + 16, rect.y + 14, 34, 34, 5);
-  ctx.fill();
-  ctx.font = "800 13px 'NewRodin', sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  drawTextWithCA(
-    `${slotIndex}`,
-    rect.x + 33,
-    rect.y + 31,
-    isSelected ? NIER_DARK : NIER_DARK,
-  );
-
-  ctx.textAlign = "left";
-  ctx.font = "800 16px 'NewRodin', sans-serif";
-  drawTextWithCA(compactLabel(hero.name, 18), rect.x + 70, rect.y + 36, textColor);
-
-  ctx.font = "700 10px 'NewRodin', sans-serif";
-  drawTextWithCA(
-    `${hero.path.toUpperCase()} / ${hero.element.toUpperCase()}`,
-    rect.x + 70,
-    rect.y + 58,
-    isSelected ? "rgba(215, 207, 184, 0.82)" : "rgba(71, 68, 59, 0.6)",
-  );
-  ctx.restore();
+  drawMenuSelectionCard({
+    rect,
+    hovered: isInside(mouse.x, mouse.y, rect),
+    isActive: isSelected,
+    entity: hero,
+    isEnemy: false,
+    indexLabel: `${slotIndex}`,
+    monogram: hero.name.charAt(0).toUpperCase(),
+    title: compactLabel(hero.name, 18),
+    subtitle: `${hero.path.toUpperCase()} / ${hero.element.toUpperCase()}`,
+    badgeText: null,
+  });
 }
 
 function drawMenuCounter(rect, enemy, count, slotIndex) {
-  const hovered = isInside(mouse.x, mouse.y, rect);
+  const weaknessText = (enemy.weaknesses || [])
+    .map((w) => w.charAt(0).toUpperCase())
+    .join(" / ");
+  drawMenuSelectionCard({
+    rect,
+    hovered: isInside(mouse.x, mouse.y, rect),
+    isActive: count > 0,
+    entity: enemy,
+    isEnemy: true,
+    indexLabel: `${slotIndex}`,
+    monogram: enemy.name.charAt(0).toUpperCase(),
+    title: compactLabel(enemy.name, 18),
+    subtitle: `WEAK ${weaknessText || "NONE"}`,
+    badgeText: count > 0 ? `${count}` : null,
+  });
+}
+
+function drawMenuSelectionCard({
+  rect,
+  hovered,
+  isActive,
+  entity,
+  isEnemy,
+  indexLabel,
+  monogram,
+  title,
+  subtitle,
+  badgeText = null,
+}) {
   ctx.save();
+
+  const bodyColor = isActive
+    ? "rgba(71, 68, 59, 0.94)"
+    : hovered
+      ? "rgba(215, 207, 184, 0.94)"
+      : "rgba(215, 207, 184, 0.82)";
+  const titleColor = isActive ? NIER_LIGHT : NIER_DARK;
+  const subtitleColor = isActive
+    ? "rgba(215, 207, 184, 0.76)"
+    : "rgba(71, 68, 59, 0.54)";
+  const portraitTextColor = isActive ? NIER_LIGHT : NIER_DARK;
+  const portraitRect = {
+    x: rect.x + rect.w - 132,
+    y: rect.y + 10,
+    w: 112,
+    h: rect.h - 20,
+  };
+  const portraitImg = getMenuEntityImage(entity, isEnemy);
+
   applyHardShadow();
-  ctx.fillStyle = hovered || count > 0 ? "rgba(215, 207, 184, 0.96)" : "rgba(215, 207, 184, 0.82)";
-  drawChamferedRect(rect.x, rect.y, rect.w, rect.h, 12);
+  ctx.fillStyle = bodyColor;
+  drawChamferedRect(rect.x, rect.y, rect.w, rect.h, 14);
   ctx.fill();
   clearShadow();
-  let textColor;
-  if (count > 0) {
-    ctx.fillStyle = NIER_DARK;
-    ctx.fill();
-    textColor = NIER_LIGHT;
-  } else if (hovered) {
-    strokeWithCA("rgba(71, 68, 59, 0.7)", 2);
-    textColor = NIER_DARK;
+  strokeWithCA(
+    isActive
+      ? "rgba(215, 207, 184, 0.22)"
+      : hovered
+        ? "rgba(71, 68, 59, 0.46)"
+        : "rgba(71, 68, 59, 0.18)",
+    hovered && !isActive ? 2 : 1,
+  );
+
+  ctx.save();
+  ctx.beginPath();
+  drawChamferedRect(rect.x, rect.y, rect.w, rect.h, 14);
+  ctx.clip();
+  const overlay = ctx.createLinearGradient(
+    rect.x,
+    rect.y,
+    rect.x + rect.w,
+    rect.y,
+  );
+  overlay.addColorStop(
+    0,
+    isActive ? "rgba(215, 207, 184, 0.03)" : "rgba(71, 68, 59, 0.02)",
+  );
+  overlay.addColorStop(
+    1,
+    isActive ? "rgba(215, 207, 184, 0.12)" : "rgba(71, 68, 59, 0.08)",
+  );
+  ctx.fillStyle = overlay;
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+
+  ctx.fillStyle = isActive
+    ? "rgba(215, 207, 184, 0.06)"
+    : "rgba(71, 68, 59, 0.05)";
+  for (let i = 0; i < rect.h; i += 8) {
+    ctx.fillRect(rect.x, rect.y + i, rect.w, 1);
+  }
+  ctx.restore();
+
+  ctx.fillStyle = isActive
+    ? "rgba(215, 207, 184, 0.14)"
+    : "rgba(71, 68, 59, 0.08)";
+  drawChamferedRect(rect.x + 14, rect.y + 12, 5, rect.h - 24, 2);
+  ctx.fill();
+
+  ctx.fillStyle = isActive
+    ? "rgba(215, 207, 184, 0.12)"
+    : "rgba(71, 68, 59, 0.08)";
+  drawChamferedRect(
+    portraitRect.x,
+    portraitRect.y,
+    portraitRect.w,
+    portraitRect.h,
+    8,
+  );
+  ctx.fill();
+  strokeWithCA(
+    isActive ? "rgba(215, 207, 184, 0.18)" : "rgba(71, 68, 59, 0.16)",
+    1,
+  );
+
+  ctx.save();
+  ctx.beginPath();
+  drawChamferedRect(
+    portraitRect.x,
+    portraitRect.y,
+    portraitRect.w,
+    portraitRect.h,
+    8,
+  );
+  ctx.clip();
+  if (
+    portraitImg &&
+    portraitImg.complete &&
+    portraitImg.naturalHeight !== 0 &&
+    !portraitImg.isPlaceholder
+  ) {
+    ctx.globalAlpha = isActive ? 0.44 : 0.26;
+    ctx.drawImage(
+      portraitImg,
+      portraitRect.x,
+      portraitRect.y,
+      portraitRect.w,
+      portraitRect.h,
+    );
+    const portraitFade = ctx.createLinearGradient(
+      portraitRect.x - 26,
+      portraitRect.x,
+      portraitRect.y,
+      portraitRect.x + portraitRect.w,
+      portraitRect.y,
+    );
+    portraitFade.addColorStop(
+      0,
+      isActive ? "rgba(71, 68, 59, 0.78)" : "rgba(215, 207, 184, 0.82)",
+    );
+    portraitFade.addColorStop(
+      0.48,
+      isActive ? "rgba(71, 68, 59, 0.22)" : "rgba(215, 207, 184, 0.18)",
+    );
+    portraitFade.addColorStop(
+      1,
+      isActive ? "rgba(71, 68, 59, 0.05)" : "rgba(215, 207, 184, 0.05)",
+    );
+    ctx.fillStyle = portraitFade;
+    ctx.fillRect(
+      portraitRect.x,
+      portraitRect.y,
+      portraitRect.w,
+      portraitRect.h,
+    );
   } else {
-    strokeWithCA("rgba(71, 68, 59, 0.22)", 1);
-    textColor = "rgba(71, 68, 59, 0.7)";
+    ctx.fillStyle = isActive
+      ? "rgba(215, 207, 184, 0.09)"
+      : "rgba(71, 68, 59, 0.05)";
+    for (let i = -portraitRect.h; i < portraitRect.w; i += 18) {
+      ctx.fillRect(
+        portraitRect.x + i,
+        portraitRect.y,
+        1,
+        portraitRect.h * 2,
+      );
+    }
+    ctx.fillStyle = isActive
+      ? "rgba(215, 207, 184, 0.14)"
+      : "rgba(71, 68, 59, 0.1)";
+    ctx.font = "800 34px 'NewRodin', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    drawTextWithCA(
+      monogram,
+      portraitRect.x + portraitRect.w / 2,
+      portraitRect.y + portraitRect.h / 2 + 3,
+      portraitTextColor,
+    );
   }
 
-  ctx.fillStyle = count > 0 ? NIER_LIGHT : "rgba(71, 68, 59, 0.12)";
-  drawChamferedRect(rect.x + 16, rect.y + 14, 34, 34, 5);
+  if (!isEnemy && portraitImg && !portraitImg.isPlaceholder && portraitImg.complete) {
+    ctx.fillStyle = isActive
+      ? "rgba(71, 68, 59, 0.22)"
+      : "rgba(215, 207, 184, 0.16)";
+    ctx.fillRect(portraitRect.x, portraitRect.y, 4, portraitRect.h);
+  } else {
+    ctx.fillStyle = isActive
+      ? "rgba(215, 207, 184, 0.08)"
+      : "rgba(71, 68, 59, 0.06)";
+    ctx.fillRect(portraitRect.x + 14, portraitRect.y + 14, portraitRect.w - 28, 1);
+    ctx.fillRect(
+      portraitRect.x + 14,
+      portraitRect.y + portraitRect.h - 15,
+      portraitRect.w - 28,
+      1,
+    );
+  }
+  ctx.restore();
+
+  const indexW = 34;
+  const indexH = 24;
+  ctx.fillStyle = isActive
+    ? "rgba(215, 207, 184, 0.12)"
+    : "rgba(71, 68, 59, 0.08)";
+  drawChamferedRect(rect.x + 14, rect.y + 12, indexW, indexH, 6);
   ctx.fill();
-  ctx.font = "800 13px 'NewRodin', sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  ctx.font = "800 11px 'NewRodin', sans-serif";
   drawTextWithCA(
-    `${slotIndex}`,
-    rect.x + 33,
-    rect.y + 31,
-    count > 0 ? NIER_DARK : NIER_DARK,
+    indexLabel,
+    rect.x + 14 + indexW / 2,
+    rect.y + 12 + indexH / 2 + 1,
+    titleColor,
   );
+
+  const textX = rect.x + 34;
+  const textW = rect.w - 188;
 
   ctx.textAlign = "left";
-  ctx.font = "800 16px 'NewRodin', sans-serif";
-  drawTextWithCA(compactLabel(enemy.name, 18), rect.x + 70, rect.y + 36, textColor);
-
-  ctx.font = "700 10px 'NewRodin', sans-serif";
-  const weaknessText = (enemy.weaknesses || []).map((w) => w.charAt(0).toUpperCase()).join(" / ");
-  drawTextWithCA(
-    `WEAK ${weaknessText || "NONE"}`,
-    rect.x + 70,
-    rect.y + 58,
-    count > 0 ? "rgba(215, 207, 184, 0.82)" : "rgba(71, 68, 59, 0.6)",
+  ctx.font = "800 19px 'NewRodin', sans-serif";
+  drawFittedLine(
+    title,
+    textX,
+    rect.y + 38,
+    textW,
+    19,
+    800,
+    titleColor,
   );
 
-  if (count > 0) {
-    const bx = rect.x + rect.w - 12;
-    const by = rect.y + 12;
-    ctx.beginPath();
-    ctx.arc(bx, by, 14, 0, Math.PI * 2);
-    ctx.fillStyle = NIER_LIGHT;
+  ctx.fillStyle = isActive
+    ? "rgba(215, 207, 184, 0.14)"
+    : "rgba(71, 68, 59, 0.12)";
+  ctx.fillRect(textX, rect.y + 53, textW, 1);
+
+  ctx.font = "700 11px 'NewRodin', sans-serif";
+  drawTextWithCA(
+    subtitle,
+    textX,
+    rect.y + 76,
+    subtitleColor,
+  );
+
+  if (isActive) {
+    ctx.fillStyle = "rgba(215, 207, 184, 0.14)";
+    ctx.fillRect(rect.x + rect.w - 12, rect.y + 20, 3, rect.h - 40);
+  }
+
+  if (badgeText) {
+    const badgeW = 30;
+    const badgeH = 22;
+    const badgeX = rect.x + rect.w - badgeW - 16;
+    const badgeY = rect.y + rect.h - badgeH - 14;
+    ctx.fillStyle = isActive ? NIER_LIGHT : "rgba(71, 68, 59, 0.12)";
+    drawChamferedRect(badgeX, badgeY, badgeW, badgeH, 6);
     ctx.fill();
-    ctx.font = "800 14px 'NewRodin', sans-serif";
-    drawTextWithCA(count.toString(), bx, by + 1, NIER_DARK);
+    ctx.font = "800 11px 'NewRodin', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    drawTextWithCA(
+      badgeText,
+      badgeX + badgeW / 2,
+      badgeY + badgeH / 2 + 1,
+      NIER_DARK,
+    );
   }
   ctx.restore();
 }
@@ -479,14 +872,14 @@ function drawMenuCounter(rect, enemy, count, slotIndex) {
 function drawMenuPageButton(btn, label, isEnabled) {
   ctx.save();
   const hovered = isInside(mouse.x, mouse.y, btn) && isEnabled;
-  ctx.globalAlpha = isEnabled ? 1 : 0.3;
+  ctx.globalAlpha = isEnabled ? 1 : 0.28;
 
-  applyHardShadow();
-  ctx.fillStyle = hovered ? "rgba(71, 68, 59, 0.92)" : "rgba(215, 207, 184, 0.88)";
+  ctx.fillStyle = hovered
+    ? "rgba(71, 68, 59, 0.92)"
+    : "rgba(215, 207, 184, 0.7)";
   drawChamferedRect(btn.x, btn.y, btn.w, btn.h, 8);
   ctx.fill();
-  clearShadow();
-  strokeWithCA("rgba(71, 68, 59, 0.28)", 1);
+  strokeWithCA("rgba(71, 68, 59, 0.24)", 1);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -677,7 +1070,12 @@ function drawSkillPoints() {
   strokeWithCA("rgba(71, 68, 59, 0.35)", 1);
 
   ctx.fillStyle = "rgba(71, 68, 59, 0.22)";
-  ctx.fillRect(labelX + 12, labelY + labelH + 5, labelW + countW + headerGap - 24, 1);
+  ctx.fillRect(
+    labelX + 12,
+    labelY + labelH + 5,
+    labelW + countW + headerGap - 24,
+    1,
+  );
 
   ctx.font = "800 11px 'NewRodin', sans-serif";
   ctx.textAlign = "center";
@@ -764,42 +1162,6 @@ function drawSkillPoints() {
       strokeWithCA("rgba(71, 68, 59, 0.4)", 1);
     }
   }
-  ctx.restore();
-}
-
-function drawHudHintStrip() {
-  if (state.current !== STATES.PLAYER_TURN) return;
-
-  const activeUnit = party.find((p) => p.id === state.activeUnitId);
-  const isSupportTargeting =
-    state.pendingAction === "SKILL" &&
-    activeUnit?.combatLogic?.skill?.targetType === "Ally";
-
-  let hintText =
-    "Q BASIC // E SKILL // 1-4 ULTIMATE // A-D CYCLE // SPACE OR ENTER EXECUTE // W ESC OR RMB CANCEL";
-
-  if (state.pendingAction) {
-    const executeKey =
-      state.pendingAction === "ATTACK"
-        ? "Q"
-        : state.pendingAction === "SKILL"
-          ? "E"
-          : "ULT";
-    hintText = isSupportTargeting
-      ? `ALLY LOCKED // CLICK OR A-D TO CHANGE // ${executeKey} AGAIN OR SPACE / ENTER TO EXECUTE // W ESC OR RMB CANCEL`
-      : `TARGET LOCKED // CLICK OR A-D TO CHANGE // ${executeKey} AGAIN OR SPACE / ENTER TO EXECUTE // W ESC OR RMB CANCEL`;
-  }
-
-  ctx.save();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "700 10px 'NewRodin', sans-serif";
-  drawTextWithCA(
-    hintText,
-    UI_PANEL.x + UI_PANEL.w / 2,
-    UI_PANEL.y + UI_PANEL.h - 10,
-    "rgba(71, 68, 59, 0.62)",
-  );
   ctx.restore();
 }
 
@@ -990,13 +1352,14 @@ export function drawUI() {
   }
 
   drawTooltip();
-  drawHudHintStrip();
   ctx.restore();
 }
 
 function drawCommandReadout() {
   const activeUnit = party.find((p) => p.id === state.activeUnitId);
-  const targetEnemy = enemies.find((enemy) => enemy.id === state.selectedTargetId);
+  const targetEnemy = enemies.find(
+    (enemy) => enemy.id === state.selectedTargetId,
+  );
   const targetAlly = party.find((hero) => hero.id === state.selectedAllyId);
 
   const leftPodX = UI_PANEL.x + 26;
